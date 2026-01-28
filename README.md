@@ -1,4 +1,2 @@
 # slAIde
 slide generation
-
-tset
