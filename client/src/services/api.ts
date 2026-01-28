@@ -95,3 +95,36 @@ export async function generateDeck(
     }),
   })
 }
+
+export async function generateSlidePreview(
+  contentText: string,
+  images: Array<{ filename: string; data: string }>
+): Promise<{ slides: any[] }> {
+  return fetchApi('/api/preview-slides', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content_text: contentText,
+      images,
+    }),
+  })
+}
+
+export async function generateDeckFromSlides(
+  slides: any[],
+  images: Array<{ filename: string; data: string }>
+): Promise<{ success: boolean; message: string; file: string; slides_count: number }> {
+  return fetchApi(API_ENDPOINTS.generateDeck, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content_text: '',
+      images,
+      slides,
+    }),
+  })
+}

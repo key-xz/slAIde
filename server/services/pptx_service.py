@@ -7,13 +7,19 @@ from utils.pptx_extractors import (
     extract_master_properties,
     extract_shape_properties
 )
+from utils.style_extractor import (
+    extract_placeholder_complete_styling,
+    apply_placeholder_styling
+)
+from utils.slide_layout_extractor import extract_all_slides_as_layouts
+from utils.slide_generator import generate_slide_from_template
 
 
 class PPTXService:
     def __init__(self):
         self.stored_rules = None
         self.template_path = None
-        self.uploaded_images = {}  # Store uploaded images by filename
+        self.uploaded_images = {}
     
     def cleanup_template(self):
         if self.template_path and os.path.exists(self.template_path):
@@ -33,63 +39,33 @@ class PPTXService:
         try:
             prs = Presentation(self.template_path)
             
+            if len(prs.slides) == 0:
+                raise ValueError('The uploaded presentation has no slides. Please upload a presentation with at least one example slide.')
+            
+            layouts = extract_all_slides_as_layouts(prs)
+            
             rules = {
                 'slide_size': {
                     'width': prs.slide_width,
                     'height': prs.slide_height
                 },
-                'masters': [],
-                'slides': [],
-                'layouts': []
+                'layouts': layouts,
+                'extraction_method': 'rigid_slide_templates'
             }
             
-            layout_map = {}
-            for master in prs.slide_masters:
-                master_props = extract_master_properties(master)
-                rules['masters'].append(master_props)
-                
-                for layout_idx, layout in enumerate(master.slide_layouts):
-                    layout_key = f"{master.name}_{layout.name}"
-                    if layout_key not in layout_map:
-                        layout_map[layout_key] = {
-                            'name': layout.name,
-                            'master_name': master.name if hasattr(master, 'name') else 'Master',
-                            'layout_idx': layout_idx,
-                            'placeholders': []
-                        }
-                        
-                        for ph in layout.placeholders:
-                            ph_type = str(ph.placeholder_format.type)
-                            layout_map[layout_key]['placeholders'].append({
-                                'idx': ph.placeholder_format.idx,
-                                'type': ph_type,
-                                'name': ph.name,
-                                'position': {
-                                    'left': ph.left,
-                                    'top': ph.top,
-                                    'width': ph.width,
-                                    'height': ph.height
-                                }
-                            })
+            print(f"\n✓ extracted {len(layouts)} rigid layout templates")
             
-            rules['layouts'] = list(layout_map.values())
+            text_placeholder_count = sum(
+                len([p for p in layout['placeholders'] if p['type'] == 'text'])
+                for layout in layouts
+            )
+            image_placeholder_count = sum(
+                len([p for p in layout['placeholders'] if p['type'] == 'image'])
+                for layout in layouts
+            )
             
-            for idx, slide in enumerate(prs.slides):
-                slide_props = {
-                    'index': idx,
-                    'layout_name': slide.slide_layout.name,
-                    'shapes': []
-                }
-                
-                for shape in slide.shapes:
-                    try:
-                        shape_props = extract_shape_properties(shape)
-                        slide_props['shapes'].append(shape_props)
-                    except Exception as e:
-                        print(f"error processing shape: {e}")
-                        continue
-                
-                rules['slides'].append(slide_props)
+            print(f"  total text placeholders: {text_placeholder_count}")
+            print(f"  total image placeholders: {image_placeholder_count}")
             
             self.stored_rules = rules
             return rules
@@ -175,6 +151,9 @@ class PPTXService:
         if self.stored_rules is None:
             raise ValueError('No rules stored')
         
+        if not isinstance(slide_specs, list):
+            raise ValueError(f'slide_specs must be a list, got {type(slide_specs)}')
+        
         prs = Presentation(self.template_path)
         
         for i in range(len(prs.slides) - 1, -1, -1):
@@ -182,65 +161,38 @@ class PPTXService:
             prs.part.drop_rel(rId)
             del prs.slides._sldIdLst[i]
         
-        for spec in slide_specs:
+        layouts = self.stored_rules.get('layouts', [])
+        layout_map = {layout['name']: layout for layout in layouts}
+        
+        for i, spec in enumerate(slide_specs):
+            if not isinstance(spec, dict):
+                raise ValueError(f'slide_spec {i} must be a dict, got {type(spec)}: {spec}')
+            
             layout_name = spec.get('layout_name')
             placeholders_data = spec.get('placeholders', [])
             
-            target_layout = None
-            for master in prs.slide_masters:
-                for layout in master.slide_layouts:
-                    if layout.name == layout_name:
-                        target_layout = layout
-                        break
-                if target_layout:
-                    break
+            print(f"\ngenerating slide {i + 1}: {layout_name}")
+            print(f"content items: {len(placeholders_data)}")
             
-            if not target_layout:
-                print(f"Warning: Layout '{layout_name}' not found, skipping slide")
+            if layout_name not in layout_map:
+                print(f"  error: layout '{layout_name}' not found, skipping")
                 continue
             
-            slide = prs.slides.add_slide(target_layout)
+            layout_template = layout_map[layout_name]
             
-            for ph_data in placeholders_data:
-                ph_idx = str(ph_data.get('idx'))
-                ph_type = ph_data.get('type')
-                
-                placeholder = None
-                for ph in slide.placeholders:
-                    if str(ph.placeholder_format.idx) == ph_idx:
-                        placeholder = ph
-                        break
-                
-                if not placeholder:
-                    continue
-                
-                if ph_type == 'text':
-                    content = ph_data.get('content', '')
-                    if hasattr(placeholder, 'text_frame'):
-                        placeholder.text = content
-                
-                elif ph_type == 'image':
-                    image_index = ph_data.get('image_index')
-                    if image_index is not None:
-                        image_filenames = list(self.uploaded_images.keys())
-                        if 0 <= image_index < len(image_filenames):
-                            filename = image_filenames[image_index]
-                            image_data = self.uploaded_images[filename]
-                            
-                            if ',' in image_data:
-                                image_data = image_data.split(',')[1]
-                            
-                            image_bytes = base64.b64decode(image_data)
-                            image_stream = BytesIO(image_bytes)
-                            
-                            left = placeholder.left
-                            top = placeholder.top
-                            width = placeholder.width
-                            height = placeholder.height
-                            
-                            sp = placeholder.element
-                            sp.getparent().remove(sp)
-                            slide.shapes.add_picture(image_stream, left, top, width, height)
+            try:
+                generate_slide_from_template(
+                    prs,
+                    layout_template,
+                    placeholders_data,
+                    self.uploaded_images
+                )
+                print(f"  ✓ slide generated successfully")
+            except Exception as e:
+                print(f"  error generating slide: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
         
         output = BytesIO()
         prs.save(output)

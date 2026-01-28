@@ -31,3 +31,17 @@ export interface PlaceholderInput {
   type: 'text' | 'image'
   value: string
 }
+
+export interface SlideContent {
+  idx: number
+  type: 'text' | 'image'
+  content?: string
+  image_index?: number
+  imageData?: string
+}
+
+export interface SlideSpec {
+  id: string
+  layout_name: string
+  placeholders: SlideContent[]
+}

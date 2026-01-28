@@ -1,9 +1,16 @@
 from flask import Blueprint, request, jsonify
 from services import PPTXService, AIService
+from utils.layout_validator import validate_content_feasibility, get_feasibility_summary
 
 api_blueprint = Blueprint('api', __name__, url_prefix='/api')
 pptx_service = PPTXService()
-ai_service = AIService()
+ai_service = None
+
+def get_ai_service():
+    global ai_service
+    if ai_service is None:
+        ai_service = AIService()
+    return ai_service
 
 
 @api_blueprint.route('/health', methods=['GET'])
@@ -67,15 +74,26 @@ def generate_slide():
         return jsonify({'error': str(e)}), 500
 
 
-@api_blueprint.route('/generate-deck', methods=['POST'])
-def generate_deck():
+@api_blueprint.route('/preview-slides', methods=['POST'])
+def preview_slides():
+    """Generate slide specifications without creating the PowerPoint file"""
     try:
-        data = request.get_json()
-        content_text = data.get('content_text', '')
-        images = data.get('images', [])
+        request_data = request.get_json()
         
-        if not content_text:
-            return jsonify({'error': 'Content text is required'}), 400
+        if not request_data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        content_text = request_data.get('content_text', '')
+        images = request_data.get('images', [])
+        
+        if not content_text and not images:
+            return jsonify({'error': 'Either content_text or images is required'}), 400
+        
+        if content_text and not isinstance(content_text, str):
+            return jsonify({'error': 'Content text must be a string'}), 400
+        
+        if not isinstance(images, list):
+            return jsonify({'error': 'Images must be an array'}), 400
         
         rules = pptx_service.get_stored_rules()
         layouts = rules.get('layouts', [])
@@ -83,20 +101,154 @@ def generate_deck():
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
         
-        pptx_service.clear_images()
-        image_filenames = []
-        for img in images:
-            filename = img.get('filename')
-            data = img.get('data')
-            if filename and data:
-                pptx_service.store_image(filename, data)
-                image_filenames.append(filename)
+        num_images = len(images)
+        has_text_content = bool(content_text and content_text.strip())
         
-        slide_specs = ai_service.organize_content_into_slides(
+        is_valid, error_message = validate_content_feasibility(layouts, num_images, has_text_content)
+        
+        if not is_valid:
+            summary = get_feasibility_summary(layouts, num_images)
+            return jsonify({
+                'error': error_message,
+                'template_analysis': summary
+            }), 400
+        
+        image_filenames = []
+        image_data_list = []
+        
+        for i, img in enumerate(images):
+            if not isinstance(img, dict):
+                return jsonify({'error': f'Image {i} must be an object with filename and data'}), 400
+            
+            filename = img.get('filename')
+            image_data = img.get('data')
+            
+            if not filename or not image_data:
+                return jsonify({'error': f'Image {i} missing filename or data'}), 400
+            
+            image_filenames.append(filename)
+            image_data_list.append(image_data)
+        
+        slide_specs = get_ai_service().organize_content_into_slides(
             content_text=content_text,
             image_filenames=image_filenames,
-            layouts=layouts
+            layouts=layouts,
+            image_data_list=image_data_list,
+            slides_specification=[]
         )
+        
+        return jsonify({
+            'slides': slide_specs
+        })
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/generate-deck', methods=['POST'])
+def generate_deck():
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        content_text = request_data.get('content_text', '')
+        images = request_data.get('images', [])
+        slides_spec = request_data.get('slides', [])
+        
+        if not content_text and not slides_spec:
+            return jsonify({'error': 'Either content_text or slides specification is required'}), 400
+        
+        if content_text and not isinstance(content_text, str):
+            return jsonify({'error': 'Content text must be a string'}), 400
+        
+        if not isinstance(images, list):
+            return jsonify({'error': 'Images must be an array'}), 400
+        
+        if not isinstance(slides_spec, list):
+            return jsonify({'error': 'Slides must be an array'}), 400
+        
+        rules = pptx_service.get_stored_rules()
+        layouts = rules.get('layouts', [])
+        
+        if not layouts:
+            return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
+        
+        # If slides_spec is provided, use it directly and extract images from it
+        if slides_spec:
+            # Extract unique image indices from slides_spec
+            image_indices = set()
+            for slide in slides_spec:
+                for placeholder in slide.get('placeholders', []):
+                    if placeholder.get('type') == 'image' and 'image_index' in placeholder:
+                        image_indices.add(placeholder['image_index'])
+            
+            # Validate we have all needed images
+            if image_indices and images:
+                max_image_index = max(image_indices) if image_indices else -1
+                if max_image_index >= len(images):
+                    return jsonify({'error': f'Image index {max_image_index} referenced but only {len(images)} images provided'}), 400
+            
+            # Store images
+            pptx_service.clear_images()
+            for i, img in enumerate(images):
+                if not isinstance(img, dict):
+                    return jsonify({'error': f'Image {i} must be an object with filename and data'}), 400
+                
+                filename = img.get('filename')
+                image_data = img.get('data')
+                
+                if not filename or not image_data:
+                    return jsonify({'error': f'Image {i} missing filename or data'}), 400
+                
+                pptx_service.store_image(filename, image_data)
+            
+            # Use slides_spec directly
+            slide_specs = slides_spec
+        else:
+            # Original flow: generate slides from content
+            num_images = len(images)
+            has_text_content = bool(content_text and content_text.strip())
+            
+            is_valid, error_message = validate_content_feasibility(layouts, num_images, has_text_content)
+            
+            if not is_valid:
+                summary = get_feasibility_summary(layouts, num_images)
+                return jsonify({
+                    'error': error_message,
+                    'template_analysis': summary
+                }), 400
+            
+            pptx_service.clear_images()
+            image_filenames = []
+            image_data_list = []
+            
+            for i, img in enumerate(images):
+                if not isinstance(img, dict):
+                    return jsonify({'error': f'Image {i} must be an object with filename and data'}), 400
+                
+                filename = img.get('filename')
+                image_data = img.get('data')
+                
+                if not filename or not image_data:
+                    return jsonify({'error': f'Image {i} missing filename or data'}), 400
+                
+                pptx_service.store_image(filename, image_data)
+                image_filenames.append(filename)
+                image_data_list.append(image_data)
+            
+            slide_specs = get_ai_service().organize_content_into_slides(
+                content_text=content_text,
+                image_filenames=image_filenames,
+                layouts=layouts,
+                image_data_list=image_data_list,
+                slides_specification=[]
+            )
         
         file_b64 = pptx_service.generate_deck(slide_specs)
         
@@ -110,4 +262,6 @@ def generate_deck():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500

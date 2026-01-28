@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { useSlideGenerator } from './hooks/useSlideGenerator'
 import { FileUploadSection } from './components/FileUploadSection'
 import { BulkContentUpload } from './components/BulkContentUpload'
+import { SlideEditor } from './components/SlideEditor'
 import { DownloadSection } from './components/DownloadSection'
 import { RulesViewer } from './components/RulesViewer'
 import { ErrorDisplay } from './components/ErrorDisplay'
 
-type Tab = 'assets' | 'generate' | 'edit'
+type Tab = 'assets' | 'generate'
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('assets')
@@ -18,41 +19,48 @@ function App() {
     error,
     generating,
     generatedFile,
+    slides,
+    previewLoading,
     handleFileChange,
     handleUpload,
+    handleGeneratePreview,
     handleGenerateDeck,
+    setSlides,
   } = useSlideGenerator()
 
   return (
-    <div className="app-container">
-      <div className="header">
-        <h1>slAIde</h1>
-        <div className="tabs">
+    <div className="flex flex-col h-screen overflow-hidden">
+      <div className="flex-shrink-0 bg-gray-50 border-b border-gray-200">
+        <h1 className="px-8 pt-4 pb-2 text-2xl font-semibold">slAIde</h1>
+        <div className="flex px-8">
           <button
-            className={`tab ${activeTab === 'assets' ? 'active' : ''}`}
+            className={`px-6 py-3 font-medium text-sm transition-all border-b-2 ${
+              activeTab === 'assets'
+                ? 'text-blue-600 border-blue-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-black/5'
+            }`}
             onClick={() => setActiveTab('assets')}
           >
-            Asset Upload
+            Template Upload
           </button>
           <button
-            className={`tab ${activeTab === 'generate' ? 'active' : ''}`}
+            className={`px-6 py-3 font-medium text-sm transition-all border-b-2 ${
+              activeTab === 'generate'
+                ? 'text-blue-600 border-blue-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-black/5'
+            }`}
             onClick={() => setActiveTab('generate')}
           >
             Slide Generation
           </button>
-          <button
-            className={`tab ${activeTab === 'edit' ? 'active' : ''}`}
-            onClick={() => setActiveTab('edit')}
-          >
-            Editing
-          </button>
         </div>
       </div>
 
-      <div className="tab-content">
+      <div className="flex-1 overflow-y-auto p-8">
         {activeTab === 'assets' && (
-          <div className="assets-tab">
-            <h2>Upload Assets & Templates</h2>
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-xl font-semibold mb-2">Upload PowerPoint Template</h2>
+            <p className="text-gray-500 mb-6">Upload a .pptx template to extract layouts and styling rules</p>
             <FileUploadSection
               file={file}
               loading={loading}
@@ -65,40 +73,43 @@ function App() {
         )}
 
         {activeTab === 'generate' && (
-          <div className="generate-tab">
-            <h2>Generate Slide Deck</h2>
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-xl font-semibold mb-4">Generate Slide Deck</h2>
             {!rules && (
-              <p className="info-message">
-                Please upload a PowerPoint template in the Asset Upload tab first.
+              <p className="p-4 bg-blue-50 border border-blue-200 rounded text-blue-800 my-4">
+                Please upload a PowerPoint template in the Template Upload tab first.
               </p>
             )}
             
             {rules && (
               <>
-                <div className="info-banner">
-                  <p>
-                    <strong>How it works:</strong> Enter your content below (can be unorganized notes, 
-                    bullet points, or paragraphs) and upload any images. Our AI will organize everything 
-                    into a professional slide deck using your template layouts.
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-8">
+                  <p className="text-blue-900 leading-relaxed">
+                    <strong>How to use:</strong> Type or upload content, add images, then generate slide previews.
+                    Drag to reorder, click text to edit, then generate the final PowerPoint.
                   </p>
                 </div>
                 
                 <BulkContentUpload
-                  onGenerate={handleGenerateDeck}
-                  generating={generating}
+                  onGenerate={handleGeneratePreview}
+                  generating={previewLoading}
                 />
 
                 {error && <ErrorDisplay error={error} />}
+                
+                {slides.length > 0 && rules && (
+                  <SlideEditor
+                    slides={slides}
+                    rules={rules}
+                    onSlidesUpdate={setSlides}
+                    onGenerate={handleGenerateDeck}
+                    generating={generating}
+                  />
+                )}
+
                 {generatedFile && <DownloadSection generatedFile={generatedFile} />}
               </>
             )}
-          </div>
-        )}
-
-        {activeTab === 'edit' && (
-          <div className="edit-tab">
-            <h2>Edit Slides</h2>
-            <p className="info-message">Editing functionality coming soon...</p>
           </div>
         )}
       </div>
