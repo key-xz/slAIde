@@ -13,6 +13,7 @@ class PPTXService:
     def __init__(self):
         self.stored_rules = None
         self.template_path = None
+        self.uploaded_images = {}  # Store uploaded images by filename
     
     def cleanup_template(self):
         if self.template_path and os.path.exists(self.template_path):
@@ -154,6 +155,92 @@ class PPTXService:
                         sp = placeholder.element
                         sp.getparent().remove(sp)
                         slide.shapes.add_picture(image_stream, left, top, width, height)
+        
+        output = BytesIO()
+        prs.save(output)
+        output.seek(0)
+        
+        return base64.b64encode(output.getvalue()).decode('utf-8')
+    
+    def store_image(self, filename, image_data_base64):
+        self.uploaded_images[filename] = image_data_base64
+    
+    def clear_images(self):
+        self.uploaded_images = {}
+    
+    def generate_deck(self, slide_specs):
+        if not self.template_path or not os.path.exists(self.template_path):
+            raise ValueError('No template presentation available')
+        
+        if self.stored_rules is None:
+            raise ValueError('No rules stored')
+        
+        prs = Presentation(self.template_path)
+        
+        for i in range(len(prs.slides) - 1, -1, -1):
+            rId = prs.slides._sldIdLst[i].rId
+            prs.part.drop_rel(rId)
+            del prs.slides._sldIdLst[i]
+        
+        for spec in slide_specs:
+            layout_name = spec.get('layout_name')
+            placeholders_data = spec.get('placeholders', [])
+            
+            target_layout = None
+            for master in prs.slide_masters:
+                for layout in master.slide_layouts:
+                    if layout.name == layout_name:
+                        target_layout = layout
+                        break
+                if target_layout:
+                    break
+            
+            if not target_layout:
+                print(f"Warning: Layout '{layout_name}' not found, skipping slide")
+                continue
+            
+            slide = prs.slides.add_slide(target_layout)
+            
+            for ph_data in placeholders_data:
+                ph_idx = str(ph_data.get('idx'))
+                ph_type = ph_data.get('type')
+                
+                placeholder = None
+                for ph in slide.placeholders:
+                    if str(ph.placeholder_format.idx) == ph_idx:
+                        placeholder = ph
+                        break
+                
+                if not placeholder:
+                    continue
+                
+                if ph_type == 'text':
+                    content = ph_data.get('content', '')
+                    if hasattr(placeholder, 'text_frame'):
+                        placeholder.text = content
+                
+                elif ph_type == 'image':
+                    image_index = ph_data.get('image_index')
+                    if image_index is not None:
+                        image_filenames = list(self.uploaded_images.keys())
+                        if 0 <= image_index < len(image_filenames):
+                            filename = image_filenames[image_index]
+                            image_data = self.uploaded_images[filename]
+                            
+                            if ',' in image_data:
+                                image_data = image_data.split(',')[1]
+                            
+                            image_bytes = base64.b64decode(image_data)
+                            image_stream = BytesIO(image_bytes)
+                            
+                            left = placeholder.left
+                            top = placeholder.top
+                            width = placeholder.width
+                            height = placeholder.height
+                            
+                            sp = placeholder.element
+                            sp.getparent().remove(sp)
+                            slide.shapes.add_picture(image_stream, left, top, width, height)
         
         output = BytesIO()
         prs.save(output)

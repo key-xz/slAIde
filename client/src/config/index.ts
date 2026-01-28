@@ -9,6 +9,7 @@ export const API_ENDPOINTS = {
   extractRules: '/api/extract-rules',
   getRules: '/api/rules',
   generateSlide: '/api/generate-slide',
+  generateDeck: '/api/generate-deck',
   health: '/api/health',
 } as const
 

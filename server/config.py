@@ -13,6 +13,8 @@ class Config:
     MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', 52428800))
     ALLOWED_EXTENSIONS = {'.pptx'}
     TEMP_DIR = os.path.join(os.path.dirname(__file__), 'temp')
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    AI_MODEL = os.getenv('AI_MODEL', 'gpt-4o')
     
     @staticmethod
     def init_app(app):

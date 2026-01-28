@@ -27,7 +27,7 @@ export function FileUploadSection({
         onChange={handleChange}
       />
       <button onClick={onUpload} disabled={!file || loading}>
-        {loading ? 'extracting...' : 'extract Rules'}
+        {loading ? 'extracting...' : 'extract rules'}
       </button>
     </div>
   )

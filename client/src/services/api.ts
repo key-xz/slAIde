@@ -79,3 +79,19 @@ export async function checkHealth(): Promise<{ status: string }> {
     method: 'GET',
   })
 }
+
+export async function generateDeck(
+  contentText: string,
+  images: Array<{ filename: string; data: string }>
+): Promise<{ success: boolean; message: string; file: string; slides_count: number }> {
+  return fetchApi(API_ENDPOINTS.generateDeck, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content_text: contentText,
+      images,
+    }),
+  })
+}

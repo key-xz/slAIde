@@ -1,8 +1,9 @@
 from flask import Blueprint, request, jsonify
-from services import PPTXService
+from services import PPTXService, AIService
 
 api_blueprint = Blueprint('api', __name__, url_prefix='/api')
 pptx_service = PPTXService()
+ai_service = AIService()
 
 
 @api_blueprint.route('/health', methods=['GET'])
@@ -58,6 +59,52 @@ def generate_slide():
             'success': True,
             'message': 'Slide generated successfully',
             'file': file_b64
+        })
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/generate-deck', methods=['POST'])
+def generate_deck():
+    try:
+        data = request.get_json()
+        content_text = data.get('content_text', '')
+        images = data.get('images', [])
+        
+        if not content_text:
+            return jsonify({'error': 'Content text is required'}), 400
+        
+        rules = pptx_service.get_stored_rules()
+        layouts = rules.get('layouts', [])
+        
+        if not layouts:
+            return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
+        
+        pptx_service.clear_images()
+        image_filenames = []
+        for img in images:
+            filename = img.get('filename')
+            data = img.get('data')
+            if filename and data:
+                pptx_service.store_image(filename, data)
+                image_filenames.append(filename)
+        
+        slide_specs = ai_service.organize_content_into_slides(
+            content_text=content_text,
+            image_filenames=image_filenames,
+            layouts=layouts
+        )
+        
+        file_b64 = pptx_service.generate_deck(slide_specs)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Generated {len(slide_specs)} slides successfully',
+            'file': file_b64,
+            'slides_count': len(slide_specs)
         })
     
     except ValueError as e:

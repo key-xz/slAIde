@@ -1,63 +1,107 @@
+import { useState } from 'react'
 import { useSlideGenerator } from './hooks/useSlideGenerator'
 import { FileUploadSection } from './components/FileUploadSection'
-import { LayoutSelector } from './components/LayoutSelector'
-import { PlaceholderForm } from './components/PlaceholderForm'
+import { BulkContentUpload } from './components/BulkContentUpload'
 import { DownloadSection } from './components/DownloadSection'
 import { RulesViewer } from './components/RulesViewer'
 import { ErrorDisplay } from './components/ErrorDisplay'
 
+type Tab = 'assets' | 'generate' | 'edit'
+
 function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('assets')
+  
   const {
     file,
     rules,
     loading,
     error,
-    selectedLayout,
-    inputs,
     generating,
     generatedFile,
     handleFileChange,
     handleUpload,
-    handleLayoutSelect,
-    handleTextInput,
-    handleImageInput,
-    handleGenerateSlide,
+    handleGenerateDeck,
   } = useSlideGenerator()
 
   return (
     <div className="app-container">
-      <h1>slAIde</h1>
-      
-      <FileUploadSection
-        file={file}
-        loading={loading}
-        onFileChange={handleFileChange}
-        onUpload={handleUpload}
-      />
+      <div className="header">
+        <h1>slAIde</h1>
+        <div className="tabs">
+          <button
+            className={`tab ${activeTab === 'assets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('assets')}
+          >
+            Asset Upload
+          </button>
+          <button
+            className={`tab ${activeTab === 'generate' ? 'active' : ''}`}
+            onClick={() => setActiveTab('generate')}
+          >
+            Slide Generation
+          </button>
+          <button
+            className={`tab ${activeTab === 'edit' ? 'active' : ''}`}
+            onClick={() => setActiveTab('edit')}
+          >
+            Editing
+          </button>
+        </div>
+      </div>
 
-      {error && <ErrorDisplay error={error} />}
+      <div className="tab-content">
+        {activeTab === 'assets' && (
+          <div className="assets-tab">
+            <h2>Upload Assets & Templates</h2>
+            <FileUploadSection
+              file={file}
+              loading={loading}
+              onFileChange={handleFileChange}
+              onUpload={handleUpload}
+            />
+            {error && <ErrorDisplay error={error} />}
+            {rules && <RulesViewer rules={rules} />}
+          </div>
+        )}
 
-      {rules && rules.layouts && (
-        <LayoutSelector
-          layouts={rules.layouts}
-          onLayoutSelect={handleLayoutSelect}
-        />
-      )}
+        {activeTab === 'generate' && (
+          <div className="generate-tab">
+            <h2>Generate Slide Deck</h2>
+            {!rules && (
+              <p className="info-message">
+                Please upload a PowerPoint template in the Asset Upload tab first.
+              </p>
+            )}
+            
+            {rules && (
+              <>
+                <div className="info-banner">
+                  <p>
+                    <strong>How it works:</strong> Enter your content below (can be unorganized notes, 
+                    bullet points, or paragraphs) and upload any images. Our AI will organize everything 
+                    into a professional slide deck using your template layouts.
+                  </p>
+                </div>
+                
+                <BulkContentUpload
+                  onGenerate={handleGenerateDeck}
+                  generating={generating}
+                />
 
-      {selectedLayout && (
-        <PlaceholderForm
-          layout={selectedLayout}
-          inputs={inputs}
-          generating={generating}
-          onTextInput={handleTextInput}
-          onImageInput={handleImageInput}
-          onGenerate={handleGenerateSlide}
-        />
-      )}
+                {error && <ErrorDisplay error={error} />}
+                {generatedFile && <DownloadSection generatedFile={generatedFile} />}
+              </>
+            )}
+          </div>
+        )}
 
-      {generatedFile && <DownloadSection generatedFile={generatedFile} />}
-
-      {rules && <RulesViewer rules={rules} />}
+        {activeTab === 'edit' && (
+          <div className="edit-tab">
+            <h2>Edit Slides</h2>
+            <p className="info-message">Editing functionality coming soon...</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,18 +1,20 @@
 # slAIde
-Slide generation with AI-powered styling extraction
+AI-powered slide deck generation with template-based styling
 
 ## Overview
-slAIde allows you to upload a PowerPoint file and extract all styling rules (colors, fonts, layouts, positioning, etc.) that can be used to generate new slides following the same design guidelines.
+slAIde transforms unorganized content into professional PowerPoint presentations. Upload a PowerPoint template to extract its layouts and styling, then provide your raw content (text, notes, images) and let AI organize it into a complete, beautifully designed slide deck using deterministic python-pptx rendering.
 
 ## Architecture
 - **Frontend**: React + TypeScript + Vite (client/)
-- **Backend**: Python + Flask + python-pptx (server/)
+- **Backend**: Python + Flask + python-pptx + OpenAI (server/)
 
 ## Features
-- Extract styling rules from PowerPoint templates
-- Dynamic layout selection
-- Automatic placeholder detection
-- Support for text and image placeholders
+- **Template Management**: Upload PowerPoint templates to extract layouts, styling rules, and placeholders
+- **AI Content Organization**: Submit unorganized content and images; AI structures it into slides
+- **Smart Layout Selection**: AI automatically chooses appropriate layouts for each slide
+- **Content-Image Pairing**: AI intelligently pairs images with relevant text content
+- **Deterministic Rendering**: All slides generated via python-pptx for consistent, template-adherent output
+- **Tab-based Interface**: Separate workflows for asset upload, deck generation, and editing
 - Environment-based configuration
 - Modular, maintainable codebase
 - Production-ready architecture
@@ -40,7 +42,9 @@ pip install -r requirements.txt
 4. Configure environment variables:
 ```bash
 cp .env.example .env.development
-# Edit .env.development if needed
+# Edit .env.development and add your OpenAI API key:
+# OPENAI_API_KEY=your_openai_api_key_here
+# AI_MODEL=gpt-4o  # or gpt-4o-mini for faster/cheaper responses
 ```
 
 5. Run the Flask server:
@@ -101,6 +105,94 @@ Key variables:
 - `HOST` - Server host
 - `CORS_ORIGINS` - Allowed CORS origins (comma-separated)
 - `MAX_CONTENT_LENGTH` - Max upload size in bytes
+- `OPENAI_API_KEY` - OpenAI API key for AI content organization
+- `AI_MODEL` - OpenAI model to use (default: gpt-4o)
+
+## Usage
+
+### Workflow
+
+The application provides three main tabs:
+
+#### 1. Asset Upload Tab
+**Purpose**: Upload and manage templates and assets
+- Upload PowerPoint (.pptx) files to use as templates
+- Extract layout information and styling rules
+- View extracted rules and available layouts
+- *Future*: Upload images to use as assets across multiple presentations
+
+**Steps**:
+1. Click "Asset Upload" tab
+2. Select a PowerPoint file (.pptx)
+3. Click "Extract Rules"
+4. Review the extracted layouts and rules
+
+#### 2. Slide Generation Tab
+**Purpose**: Generate complete slide decks from unorganized content
+- Enter raw content (notes, bullet points, paragraphs)
+- Upload images to include in the presentation
+- AI organizes content into structured slides
+- AI pairs images with relevant text
+- AI selects appropriate layouts for each slide
+- Generate complete presentation using python-pptx
+
+**Steps**:
+1. Click "Slide Generation" tab
+2. Enter your content in the text area (can be unorganized)
+3. Optionally upload images you want to include
+4. Click "Generate Deck with AI"
+5. AI processes your content and creates slides
+6. Download the generated presentation
+
+**Example Content**:
+```
+Introduction to our new product line
+
+Key features:
+- Fast performance - 10x faster than competitors
+- Easy to use - intuitive interface
+- Reliable - 99.9% uptime
+
+Customer testimonials and success stories
+
+Pricing:
+- Basic: $10/month
+- Pro: $25/month
+- Enterprise: Contact us
+
+Call to action: Sign up today and get 30% off
+```
+
+The AI will:
+- Create a title slide
+- Organize features across slides with appropriate layouts
+- Pair uploaded images with relevant content
+- Create pricing slides
+- Add a closing slide with the call to action
+
+#### 3. Editing Tab
+**Purpose**: Edit and refine generated slides *(Coming soon)*
+
+### API Endpoints
+
+#### POST `/api/extract-rules`
+Extract layout and styling rules from a PowerPoint template
+- **Input**: PowerPoint file (multipart/form-data)
+- **Output**: JSON with layouts, masters, slides, and styling rules
+
+#### POST `/api/generate-deck`
+Generate a complete presentation from unorganized content
+- **Input**: 
+  ```json
+  {
+    "content_text": "Raw content...",
+    "images": [
+      {"filename": "image1.jpg", "data": "base64..."},
+      {"filename": "image2.png", "data": "base64..."}
+    ]
+  }
+  ```
+- **Output**: Base64 encoded PowerPoint file
 
 ## Deployment
 
