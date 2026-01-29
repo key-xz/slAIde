@@ -1,15 +1,25 @@
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-from utils.style_extractor import extract_placeholder_complete_styling
+import base64
+from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 
 
 def extract_shape_complete_properties(shape):
-    
+    """
+    extracts all relevant properties from a shape.
+    treats all text boxes and images as content areas for google slides compatibility.
+    """
     shape_type = shape.shape_type
     
-    # Get the real placeholder index if it exists
+    # check if it's a placeholder
+    is_placeholder = False
     real_idx = -1
-    if hasattr(shape, 'placeholder_format'):
-        real_idx = shape.placeholder_format.idx
+    
+    try:
+        if hasattr(shape, 'is_placeholder') and shape.is_placeholder:
+            is_placeholder = True
+            if hasattr(shape, 'placeholder_format'):
+                real_idx = shape.placeholder_format.idx
+    except:
+        pass
     
     base_props = {
         'placeholder_idx': real_idx,
@@ -24,12 +34,19 @@ def extract_shape_complete_properties(shape):
         'rotation': shape.rotation if hasattr(shape, 'rotation') else 0
     }
     
+    # determine content type
     if shape_type == MSO_SHAPE_TYPE.PICTURE:
         base_props['content_type'] = 'image'
         base_props['is_placeholder'] = True
+        # extract image data to recreate static pictures
+        try:
+            base_props['image_data'] = base64.b64encode(shape.image.blob).decode('utf-8')
+        except:
+            pass
         return base_props
     
-    if hasattr(shape, 'text_frame') and shape.has_text_frame:
+    # for google slides compatibility, treat ALL text frames as content areas
+    if hasattr(shape, 'text_frame'):
         text_frame = shape.text_frame
         
         base_props['content_type'] = 'text'
@@ -163,51 +180,71 @@ def extract_shape_complete_properties(shape):
 
 
 def extract_slide_as_layout(slide, layout_index):
+    """
+    extracts layout from a slide, treating all text boxes and images as content areas.
+    """
+    slide_layout = slide.slide_layout
+    layout_name = slide_layout.name
+    
+    # try to find better name if it's just "blank"
+    if layout_name.lower() == 'blank':
+        for shape in slide.shapes:
+            try:
+                if hasattr(shape, 'text_frame') and shape.text_frame.text.strip():
+                    layout_name = shape.text_frame.text.strip()[:30]
+                    break
+            except:
+                pass
+    
     layout_def = {
-        'name': f"slide {layout_index + 1}",
-        'original_layout_name': slide.slide_layout.name,
+        'name': f"{layout_name} (slide {layout_index + 1})",
+        'original_layout_name': layout_name,
         'layout_index': layout_index,
         'placeholders': [],
         'shapes': []
     }
     
-    # We'll use a counter for our internal reference, but also store the real PPTX idx
-    internal_idx = 0
+    internal_counter = 0
     
     for shape in slide.shapes:
         try:
             shape_props = extract_shape_complete_properties(shape)
             
+            # all text frames and images are content areas
             if shape_props.get('is_placeholder', False):
                 layout_def['placeholders'].append({
-                    'idx': internal_idx,
+                    'idx': internal_counter,
                     'real_pptx_idx': shape_props['placeholder_idx'],
                     'type': shape_props['content_type'],
                     'name': shape.name,
                     'position': shape_props['position'],
                     'properties': shape_props
                 })
-                internal_idx += 1
+                internal_counter += 1
             else:
                 layout_def['shapes'].append(shape_props)
         
         except Exception as e:
             print(f"  warning: failed to extract shape '{shape.name}': {e}")
+            import traceback
+            traceback.print_exc()
             continue
     
     return layout_def
 
 
 def extract_all_slides_as_layouts(presentation):
+    """
+    extracts layouts from all slides in presentation.
+    """
     layouts = []
-    
     print(f"\nextracting {len(presentation.slides)} slides as layout templates...")
     
     for idx, slide in enumerate(presentation.slides):
         print(f"  extracting slide {idx + 1} ({slide.slide_layout.name})...")
         layout = extract_slide_as_layout(slide, idx)
         
-        print(f"    found {len(layout['placeholders'])} content placeholders")
+        print(f"    found {len(layout['placeholders'])} content areas")
         print(f"    found {len(layout['shapes'])} static shapes")
         
         layouts.append(layout)

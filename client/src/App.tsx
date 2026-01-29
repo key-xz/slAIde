@@ -5,7 +5,7 @@ import { BulkContentUpload } from './components/BulkContentUpload'
 import { ContentStructurePreview } from './components/ContentStructurePreview'
 import { SlideEditor } from './components/SlideEditor'
 import { DownloadSection } from './components/DownloadSection'
-import { RulesViewer } from './components/RulesViewer'
+import { LayoutManager } from './components/LayoutManager'
 import { ErrorDisplay } from './components/ErrorDisplay'
 
 type Tab = 'assets' | 'generate'
@@ -28,8 +28,8 @@ function App() {
     handleUpload,
     handlePreprocessContent,
     handleGenerateFromStructure,
-    handleGeneratePreview,
     handleGenerateDeck,
+    handleDeleteLayout,
     setSlides,
     setContentStructure,
   } = useSlideGenerator()
@@ -47,7 +47,7 @@ function App() {
             }`}
             onClick={() => setActiveTab('assets')}
           >
-            Template Upload
+            template upload
           </button>
           <button
             className={`px-6 py-3 font-medium text-sm transition-all border-b-2 ${
@@ -57,7 +57,7 @@ function App() {
             }`}
             onClick={() => setActiveTab('generate')}
           >
-            Slide Generation
+            slide generation
           </button>
         </div>
       </div>
@@ -65,7 +65,7 @@ function App() {
       <div className="flex-1 overflow-y-auto p-8">
         {activeTab === 'assets' && (
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-xl font-semibold mb-6">Upload Template</h2>
+            <h2 className="text-xl font-semibold mb-6">upload template</h2>
             <FileUploadSection
               file={file}
               loading={loading}
@@ -73,7 +73,7 @@ function App() {
               onUpload={handleUpload}
             />
             {error && <ErrorDisplay error={error} />}
-            {rules && <RulesViewer rules={rules} />}
+            {rules && <LayoutManager rules={rules} onDeleteLayout={handleDeleteLayout} />}
           </div>
         )}
 
@@ -81,7 +81,7 @@ function App() {
           <div className="max-w-6xl mx-auto">
             {!rules ? (
               <p className="p-4 bg-blue-50 border border-blue-200 rounded text-blue-800 my-4">
-                Please upload a template first.
+                please upload a template first.
               </p>
             ) : (
               <>
@@ -99,7 +99,7 @@ function App() {
                     <ContentStructurePreview
                       structure={contentStructure}
                       onApprove={handleGenerateFromStructure}
-                      onEdit={(editedStructure) => {
+                      onEdit={(editedStructure: any) => {
                         setContentStructure(editedStructure)
                       }}
                       loading={previewLoading}
@@ -108,7 +108,7 @@ function App() {
                       onClick={() => setContentStructure(null)}
                       className="mt-4 px-4 py-2 text-gray-400 hover:text-gray-600 underline text-sm"
                     >
-                      ← Back
+                      ← back
                     </button>
                   </>
                 )}
