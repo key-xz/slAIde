@@ -4,9 +4,12 @@ def extract_color(color):
     
     try:
         if hasattr(color, 'rgb') and color.rgb:
+            # Convert RGBColor to hex string (e.g., "FF0000")
+            rgb_obj = color.rgb
+            rgb_hex = format(rgb_obj[0], '02X') + format(rgb_obj[1], '02X') + format(rgb_obj[2], '02X')
             return {
                 'type': 'rgb',
-                'value': str(color.rgb)
+                'value': rgb_hex
             }
         elif hasattr(color, 'theme_color') and color.theme_color:
             return {

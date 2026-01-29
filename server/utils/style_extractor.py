@@ -79,10 +79,12 @@ def extract_placeholder_complete_styling(placeholder):
                             if hasattr(font.color, 'type'):
                                 color_info['type'] = str(font.color.type)
                             if hasattr(font.color, 'rgb') and font.color.rgb:
-                                color_info['rgb'] = str(font.color.rgb)
+                                rgb_obj = font.color.rgb
+                                rgb_hex = format(rgb_obj[0], '02X') + format(rgb_obj[1], '02X') + format(rgb_obj[2], '02X')
+                                color_info['rgb'] = rgb_hex
                             if hasattr(font.color, 'theme_color') and font.color.theme_color:
                                 color_info['theme_color'] = str(font.color.theme_color)
-                            if hasattr(font.color, 'brightness'):
+                            if hasattr(font.color, 'brightness') and font.color.brightness is not None:
                                 color_info['brightness'] = font.color.brightness
                         except:
                             pass

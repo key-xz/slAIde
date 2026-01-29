@@ -2,11 +2,14 @@ import base64
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 
 
-def extract_shape_complete_properties(shape):
+def extract_shape_complete_properties(shape, default_font=None):
     """
     extracts all relevant properties from a shape.
     treats all text boxes and images as content areas for google slides compatibility.
     """
+    if default_font is None:
+        default_font = {'name': 'Calibri', 'size': 18}
+    
     shape_type = shape.shape_type
     
     # check if it's a placeholder
@@ -38,14 +41,12 @@ def extract_shape_complete_properties(shape):
     if shape_type == MSO_SHAPE_TYPE.PICTURE:
         base_props['content_type'] = 'image'
         base_props['is_placeholder'] = True
-        # extract image data to recreate static pictures
         try:
             base_props['image_data'] = base64.b64encode(shape.image.blob).decode('utf-8')
         except:
             pass
         return base_props
     
-    # for google slides compatibility, treat ALL text frames as content areas
     if hasattr(shape, 'text_frame'):
         text_frame = shape.text_frame
         
@@ -64,6 +65,7 @@ def extract_shape_complete_properties(shape):
         
         if text_frame.paragraphs:
             para = text_frame.paragraphs[0]
+            print(f"      shape '{shape.name}' has {len(text_frame.paragraphs)} paragraph(s)")
             
             base_props['paragraph_props'] = {
                 'alignment': str(para.alignment) if hasattr(para, 'alignment') and para.alignment else None,
@@ -73,15 +75,51 @@ def extract_shape_complete_properties(shape):
                 'level': para.level if hasattr(para, 'level') else 0
             }
             
+            had_runs = len(para.runs) > 0
+            if para.runs:
+                print(f"      paragraph has {len(para.runs)} run(s)")
+            else:
+                print(f"      ✗ paragraph has NO runs - will try to add dummy text")
+                try:
+                    dummy_run = para.add_run()
+                    dummy_run.text = "X"
+                    print(f"      ✓ added dummy run to extract font properties")
+                except Exception as e:
+                    print(f"      ✗ failed to add dummy run: {e}")
+            
             if para.runs:
                 run = para.runs[0]
                 font = run.font
                 
                 font_props = {}
-                if font.name:
-                    font_props['name'] = font.name
-                if font.size:
-                    font_props['size'] = font.size.pt
+                
+                try:
+                    name = font.name
+                    print(f"        font.name value: {repr(name)} (type: {type(name).__name__})")
+                    if name:
+                        font_props['name'] = name
+                        print(f"        ✓ extracted font.name: {name}")
+                    else:
+                        font_props['name'] = default_font['name']
+                        print(f"        → using default font.name from master: {default_font['name']}")
+                except Exception as e:
+                    print(f"        ✗ error getting font.name: {e}")
+                    font_props['name'] = default_font['name']
+                
+                try:
+                    size = font.size
+                    print(f"        font.size value: {repr(size)} (type: {type(size).__name__ if size else 'NoneType'})")
+                    if size:
+                        size_pt = size.pt
+                        font_props['size'] = size_pt
+                        print(f"        ✓ extracted font.size: {size_pt}pt")
+                    else:
+                        font_props['size'] = default_font['size']
+                        print(f"        → using default font.size from master: {default_font['size']}pt")
+                except Exception as e:
+                    print(f"        ✗ error getting font.size: {e}")
+                    font_props['size'] = default_font['size']
+                
                 if font.bold is not None:
                     font_props['bold'] = font.bold
                 if font.italic is not None:
@@ -95,18 +133,37 @@ def extract_shape_complete_properties(shape):
                         if hasattr(font.color, 'type'):
                             color_info['type'] = str(font.color.type)
                         if hasattr(font.color, 'rgb') and font.color.rgb:
-                            color_info['rgb'] = str(font.color.rgb)
+                            rgb_obj = font.color.rgb
+                            rgb_hex = format(rgb_obj[0], '02X') + format(rgb_obj[1], '02X') + format(rgb_obj[2], '02X')
+                            color_info['rgb'] = rgb_hex
                         if hasattr(font.color, 'theme_color') and font.color.theme_color:
                             color_info['theme_color'] = str(font.color.theme_color)
-                        if hasattr(font.color, 'brightness'):
+                        if hasattr(font.color, 'brightness') and font.color.brightness is not None:
                             color_info['brightness'] = font.color.brightness
                         if color_info:
                             font_props['color'] = color_info
-                    except:
+                    except Exception as e:
+                        print(f"    warning: failed to extract font color: {e}")
                         pass
                 
                 if font_props:
                     base_props['font_props'] = font_props
+                    font_summary = []
+                    if 'name' in font_props:
+                        font_summary.append(f"font={font_props['name']}")
+                    if 'size' in font_props:
+                        font_summary.append(f"size={font_props['size']}pt")
+                    if 'color' in font_props and 'rgb' in font_props['color']:
+                        font_summary.append(f"color=#{font_props['color']['rgb']}")
+                    if font_summary:
+                        print(f"      ✓ extracted font: {', '.join(font_summary)}")
+                
+                if not had_runs and para.runs:
+                    try:
+                        para.clear()
+                        print(f"      ✓ cleaned up dummy run")
+                    except:
+                        pass
     else:
         base_props['content_type'] = 'static'
         base_props['is_placeholder'] = False
@@ -179,12 +236,91 @@ def extract_shape_complete_properties(shape):
     return base_props
 
 
+def get_default_fonts_from_master(slide):
+    """
+    extracts default font properties from the slide master/theme.
+    returns both title and body fonts.
+    """
+    result = {
+        'title': {'name': 'Calibri', 'size': 44},
+        'body': {'name': 'Calibri', 'size': 18}
+    }
+    
+    try:
+        slide_layout = slide.slide_layout
+        slide_master = slide_layout.slide_master
+        
+        print(f"      attempting to extract fonts from master slide...")
+        
+        # try method 1: theme font scheme
+        if hasattr(slide_master, 'theme') and slide_master.theme:
+            theme = slide_master.theme
+            print(f"      found theme: {theme}")
+            if hasattr(theme, 'font_scheme') and theme.font_scheme:
+                font_scheme = theme.font_scheme
+                print(f"      found font_scheme: {font_scheme}")
+                
+                # get major (heading/title) font
+                if hasattr(font_scheme, 'major_font') and font_scheme.major_font:
+                    major_font = font_scheme.major_font
+                    print(f"      major_font attributes: {dir(major_font)}")
+                    if hasattr(major_font, 'latin') and major_font.latin:
+                        result['title']['name'] = major_font.latin
+                        print(f"      ✓ extracted theme title font: {major_font.latin}")
+                
+                # get minor (body) font
+                if hasattr(font_scheme, 'minor_font') and font_scheme.minor_font:
+                    minor_font = font_scheme.minor_font
+                    print(f"      minor_font attributes: {dir(minor_font)}")
+                    if hasattr(minor_font, 'latin') and minor_font.latin:
+                        result['body']['name'] = minor_font.latin
+                        print(f"      ✓ extracted theme body font: {minor_font.latin}")
+        
+        # try method 2: extract from actual text in master slide placeholders
+        if result['title']['name'] == 'Calibri' or result['body']['name'] == 'Calibri':
+            print(f"      theme fonts not found, trying to extract from master slide shapes...")
+            for shape in slide_master.shapes:
+                if hasattr(shape, 'text_frame') and shape.text_frame:
+                    if shape.text_frame.paragraphs:
+                        para = shape.text_frame.paragraphs[0]
+                        if not para.runs:
+                            para.add_run().text = "X"
+                        if para.runs:
+                            font = para.runs[0].font
+                            font_name = font.name
+                            font_size = font.size.pt if font.size else None
+                            
+                            if font_name:
+                                # assume top shapes are title, bottom are body
+                                if shape.top < (5143500 * 0.2):
+                                    result['title']['name'] = font_name
+                                    if font_size:
+                                        result['title']['size'] = font_size
+                                    print(f"      ✓ extracted title font from master shape: {font_name} {font_size}pt")
+                                else:
+                                    result['body']['name'] = font_name
+                                    if font_size:
+                                        result['body']['size'] = font_size
+                                    print(f"      ✓ extracted body font from master shape: {font_name} {font_size}pt")
+                                break
+        
+    except Exception as e:
+        print(f"      warning: failed to extract theme fonts: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return result
+
+
 def extract_slide_as_layout(slide, layout_index):
     """
     extracts layout from a slide, treating all text boxes and images as content areas.
     """
     slide_layout = slide.slide_layout
     layout_name = slide_layout.name
+    
+    default_fonts = get_default_fonts_from_master(slide)
+    print(f"  default fonts from master - title: {default_fonts['title']}, body: {default_fonts['body']}")
     
     # try to find better name if it's just "blank"
     if layout_name.lower() == 'blank':
@@ -208,7 +344,18 @@ def extract_slide_as_layout(slide, layout_index):
     
     for shape in slide.shapes:
         try:
-            shape_props = extract_shape_complete_properties(shape)
+            # determine if this is likely a title based on position
+            # typical slide height is around 5143500 EMUs
+            # use top 20% as title area (about 1028700 EMUs)
+            try:
+                slide_height = 5143500  # standard 16:9 slide height in EMUs
+                is_likely_title = shape.top < (slide_height * 0.2)
+            except:
+                is_likely_title = False
+            
+            default_font = default_fonts['title'] if is_likely_title else default_fonts['body']
+            print(f"      shape '{shape.name}' at y={shape.top}, using {'title' if is_likely_title else 'body'} font defaults")
+            shape_props = extract_shape_complete_properties(shape, default_font)
             
             # all text frames and images are content areas
             if shape_props.get('is_placeholder', False):

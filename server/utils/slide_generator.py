@@ -10,91 +10,143 @@ def apply_text_frame_properties(text_frame, props):
     if not props:
         return
     
+    applied_props = []
     try:
         if 'margin_left' in props and props['margin_left'] is not None:
             text_frame.margin_left = props['margin_left']
+            applied_props.append(f"margin_left={props['margin_left']}")
         if 'margin_right' in props and props['margin_right'] is not None:
             text_frame.margin_right = props['margin_right']
+            applied_props.append(f"margin_right={props['margin_right']}")
         if 'margin_top' in props and props['margin_top'] is not None:
             text_frame.margin_top = props['margin_top']
+            applied_props.append(f"margin_top={props['margin_top']}")
         if 'margin_bottom' in props and props['margin_bottom'] is not None:
             text_frame.margin_bottom = props['margin_bottom']
+            applied_props.append(f"margin_bottom={props['margin_bottom']}")
         if 'word_wrap' in props and props['word_wrap'] is not None:
             text_frame.word_wrap = props['word_wrap']
+            applied_props.append(f"word_wrap={props['word_wrap']}")
         if 'vertical_anchor' in props and props['vertical_anchor']:
             anchor_str = props['vertical_anchor']
             if 'TOP' in anchor_str:
                 text_frame.vertical_anchor = MSO_ANCHOR.TOP
+                applied_props.append("anchor=TOP")
             elif 'MIDDLE' in anchor_str:
                 text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+                applied_props.append("anchor=MIDDLE")
             elif 'BOTTOM' in anchor_str:
                 text_frame.vertical_anchor = MSO_ANCHOR.BOTTOM
+                applied_props.append("anchor=BOTTOM")
+        
+        if applied_props:
+            print(f"      ✓ applied text frame: {', '.join(applied_props)}")
     except Exception as e:
         print(f"    warning: failed to apply text frame props: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def apply_paragraph_properties(paragraph, props):
     if not props:
         return
     
+    applied_props = []
     try:
         if 'alignment' in props and props['alignment']:
             align_str = props['alignment']
             if 'LEFT' in align_str:
                 paragraph.alignment = PP_ALIGN.LEFT
+                applied_props.append("align=LEFT")
             elif 'CENTER' in align_str:
                 paragraph.alignment = PP_ALIGN.CENTER
+                applied_props.append("align=CENTER")
             elif 'RIGHT' in align_str:
                 paragraph.alignment = PP_ALIGN.RIGHT
+                applied_props.append("align=RIGHT")
             elif 'JUSTIFY' in align_str:
                 paragraph.alignment = PP_ALIGN.JUSTIFY
+                applied_props.append("align=JUSTIFY")
         
         if 'line_spacing' in props and props['line_spacing']:
             paragraph.line_spacing = props['line_spacing']
+            applied_props.append(f"line_spacing={props['line_spacing']}")
         
         if 'space_before' in props and props['space_before']:
             paragraph.space_before = Pt(props['space_before'])
+            applied_props.append(f"space_before={props['space_before']}pt")
         
         if 'space_after' in props and props['space_after']:
             paragraph.space_after = Pt(props['space_after'])
+            applied_props.append(f"space_after={props['space_after']}pt")
         
         if 'level' in props:
             paragraph.level = props['level']
+            applied_props.append(f"level={props['level']}")
+        
+        if applied_props:
+            print(f"      ✓ applied paragraph: {', '.join(applied_props)}")
     except Exception as e:
         print(f"    warning: failed to apply paragraph props: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def apply_font_properties(font, props):
     if not props:
+        print(f"      ✗ no font props provided")
         return
+    
+    print(f"      → attempting to apply font props: {props}")
     
     try:
         if 'name' in props:
-            font.name = props['name']
+            if props['name']:
+                font.name = props['name']
+                print(f"      ✓ applied font name: {props['name']}")
+            else:
+                print(f"      ✗ font name is None/empty")
+        else:
+            print(f"      ✗ no 'name' key in font props")
         
         if 'size' in props:
-            font.size = Pt(props['size'])
+            if props['size']:
+                font.size = Pt(props['size'])
+                print(f"      ✓ applied font size: {props['size']}pt")
+            else:
+                print(f"      ✗ font size is None/empty")
+        else:
+            print(f"      ✗ no 'size' key in font props")
         
-        if 'bold' in props:
+        if 'bold' in props and props['bold'] is not None:
             font.bold = props['bold']
+            print(f"      ✓ applied font bold: {props['bold']}")
         
-        if 'italic' in props:
+        if 'italic' in props and props['italic'] is not None:
             font.italic = props['italic']
+            print(f"      ✓ applied font italic: {props['italic']}")
         
-        if 'underline' in props:
+        if 'underline' in props and props['underline'] is not None:
             font.underline = props['underline']
+            print(f"      ✓ applied font underline: {props['underline']}")
         
         if 'color' in props:
             color_info = props['color']
-            if 'rgb' in color_info:
+            if 'rgb' in color_info and color_info['rgb']:
                 rgb_str = color_info['rgb']
                 if rgb_str and len(rgb_str) >= 6:
-                    r = int(rgb_str[0:2], 16)
-                    g = int(rgb_str[2:4], 16)
-                    b = int(rgb_str[4:6], 16)
+                    rgb_hex = rgb_str[:6]
+                    r = int(rgb_hex[0:2], 16)
+                    g = int(rgb_hex[2:4], 16)
+                    b = int(rgb_hex[4:6], 16)
                     font.color.rgb = RGBColor(r, g, b)
+                    print(f"      ✓ applied font color: RGB({r}, {g}, {b}) from '{rgb_str}'")
+            elif 'theme_color' in color_info and color_info['theme_color']:
+                print(f"      → theme color detected: {color_info['theme_color']} (preserved)")
     except Exception as e:
         print(f"    warning: failed to apply font props: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def apply_fill_properties(shape, props):
@@ -146,33 +198,29 @@ def create_text_shape(slide, shape_props, content):
     width = pos['width']
     height = pos['height']
     
-    # Check if this was originally a placeholder
-    real_idx = shape_props.get('placeholder_idx', -1)
-    
-    # If it's a placeholder, we should try to add it as one if possible
-    # but add_textbox is more reliable for exact positioning
     textbox = slide.shapes.add_textbox(left, top, width, height)
     text_frame = textbox.text_frame
     
-    # Strictly enforce word wrap and margins from template
+    print(f"      → creating text box at ({left}, {top}) size ({width}x{height})")
+    
     if 'text_frame_props' in shape_props:
         apply_text_frame_properties(text_frame, shape_props['text_frame_props'])
     
     text_frame.clear()
     p = text_frame.paragraphs[0]
     
-    # Strictly enforce paragraph alignment and spacing
     if 'paragraph_props' in shape_props:
         apply_paragraph_properties(p, shape_props['paragraph_props'])
     
     run = p.add_run()
     run.text = content
     
-    # Strictly enforce font name, size, color, bold, italic
     if 'font_props' in shape_props:
+        print(f"      → applying font properties: {shape_props['font_props']}")
         apply_font_properties(run.font, shape_props['font_props'])
+    else:
+        print(f"      → no font properties found in template")
     
-    # Strictly enforce fill and line (border)
     if 'fill_props' in shape_props:
         apply_fill_properties(textbox, shape_props['fill_props'])
     
@@ -214,15 +262,9 @@ def create_static_shape(slide, shape_props):
     width = pos['width']
     height = pos['height']
     
-    # Map string shape type to MSO_SHAPE_TYPE if possible
-    # This is a bit tricky as shape_type is stored as a string like 'PICTURE (13)'
-    
     if 'PICTURE' in shape_type_str:
-        # We don't have the original image data for static pictures easily
-        # but we can try to add a placeholder or skip
         return None
-        
-    # Default to a rectangle for unknown shapes, or specific ones if we can identify them
+    
     shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, left, top, width, height)
     
     if 'fill_props' in shape_props:
@@ -231,20 +273,13 @@ def create_static_shape(slide, shape_props):
         apply_line_properties(shape, shape_props['line_props'])
     if 'rotation' in shape_props:
         shape.rotation = shape_props['rotation']
-        
-    # If it has text, add it
-    if shape_props.get('content_type') == 'text' and 'text_frame_props' in shape_props:
-        # Static text
-        pass # To be implemented if needed
-        
+    
     return shape
 
 
 def generate_slide_from_template(presentation, layout_template, placeholder_contents, uploaded_images):
-    # Use the layout index to get the actual layout from the template
     layout_idx = layout_template.get('layout_index', 0)
     
-    # Try to find the corresponding slide layout in the presentation
     if layout_idx < len(presentation.slide_layouts):
         slide_layout = presentation.slide_layouts[layout_idx]
     else:
@@ -252,20 +287,16 @@ def generate_slide_from_template(presentation, layout_template, placeholder_cont
         
     slide = presentation.slides.add_slide(slide_layout)
     
-    # Map of real PPTX idx to placeholder shape on the new slide
     placeholder_map = {}
     for shape in slide.placeholders:
         placeholder_map[shape.placeholder_format.idx] = shape
     
-    # Remove all default shapes from the new slide to start with a clean slate
-    # but keep the background from the layout
     for shape in list(slide.shapes):
         sp = shape.element
         sp.getparent().remove(sp)
     
     content_map = {item['idx']: item for item in placeholder_contents}
     
-    # 1. Create all placeholders (text and image)
     for placeholder_def in layout_template['placeholders']:
         idx = placeholder_def['idx']
         real_pptx_idx = placeholder_def.get('real_pptx_idx')
@@ -278,7 +309,6 @@ def generate_slide_from_template(presentation, layout_template, placeholder_cont
         
         content_item = content_map[idx]
         
-        # Deterministically use the position and sizing from shape_props
         if ph_type == 'text' and content_item.get('type') == 'text':
             content = content_item.get('content', '')
             print(f"    creating text placeholder idx={idx} (real_idx={real_pptx_idx}): {content[:50]}...")
@@ -298,7 +328,6 @@ def generate_slide_from_template(presentation, layout_template, placeholder_cont
             else:
                 print(f"    error: no image_index for image placeholder")
     
-    # 2. Create all static shapes from the template slide
     for static_shape_props in layout_template.get('shapes', []):
         create_static_shape(slide, static_shape_props)
     
