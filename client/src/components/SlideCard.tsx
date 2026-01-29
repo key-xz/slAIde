@@ -8,7 +8,9 @@ interface SlideCardProps {
   rules: StylingRules
   onUpdate: (slideId: string, updatedSlide: SlideSpec) => void
   onDelete: (slideId: string) => void
+  onRegenerate?: (slideId: string) => void
   isDragging?: boolean
+  regenerating?: boolean
 }
 
 export function SlideCard({
@@ -18,9 +20,12 @@ export function SlideCard({
   rules,
   onUpdate,
   onDelete,
+  onRegenerate,
   isDragging,
+  regenerating,
 }: SlideCardProps) {
   const [isEditing, setIsEditing] = useState<number | null>(null)
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false)
 
   const handleContentUpdate = (placeholderIdx: number, newContent: string) => {
     const updatedPlaceholders = slide.placeholders.map(ph =>
@@ -28,6 +33,44 @@ export function SlideCard({
     )
     onUpdate(slide.id, { ...slide, placeholders: updatedPlaceholders })
     setIsEditing(null)
+  }
+
+  const handleLayoutChange = (newLayoutName: string) => {
+    const newLayout = rules.layouts.find(l => l.name === newLayoutName)
+    if (!newLayout) return
+
+    const newTextPlaceholders = newLayout.placeholders.filter(p => p.type === 'text')
+    const newImagePlaceholders = newLayout.placeholders.filter(p => p.type === 'image')
+    const oldTextContent = slide.placeholders.filter(p => p.type === 'text')
+    const oldImageContent = slide.placeholders.filter(p => p.type === 'image')
+
+    if (newTextPlaceholders.length < oldTextContent.length || 
+        newImagePlaceholders.length < oldImageContent.length) {
+      if (!confirm('new layout has fewer placeholders. some content may be lost. continue?')) {
+        return
+      }
+    }
+
+    const newPlaceholders = newLayout.placeholders.map((ph, idx) => {
+      if (ph.type === 'text') {
+        const oldContent = oldTextContent[idx]?.content || ''
+        return {
+          idx: ph.idx,
+          type: 'text' as const,
+          content: oldContent,
+        }
+      } else {
+        const oldImage = oldImageContent[idx]
+        return {
+          idx: ph.idx,
+          type: 'image' as const,
+          image_index: oldImage?.image_index,
+          imageData: oldImage?.imageData,
+        }
+      }
+    })
+
+    onUpdate(slide.id, { ...slide, layout_name: newLayoutName, placeholders: newPlaceholders })
   }
 
   const getPlaceholderStyle = (placeholder: any) => {
@@ -61,18 +104,80 @@ export function SlideCard({
 
   const aspectRatio = rules.slide_size.height / rules.slide_size.width
 
-  return (
-    <div className={`bg-white border-2 border-gray-200 rounded-lg overflow-hidden transition-all cursor-move hover:border-blue-600 hover:shadow-[0_4px_12px_rgba(0,102,204,0.15)] ${isDragging ? 'opacity-40 cursor-grabbing' : ''}`}>
-      <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-        <div className="flex gap-3 items-center flex-1">
-          <span className="font-semibold text-blue-600 text-xs">slide {slideNumber}</span>
+  const layoutsByCategory: Record<string, typeof rules.layouts> = {}
+  const availableCategories = rules.layoutCategories || []
+  
+  rules.layouts.forEach(layout => {
+    const cat = layout.category || 'uncategorized'
+    if (!layoutsByCategory[cat]) {
+      layoutsByCategory[cat] = []
+    }
+    layoutsByCategory[cat].push(layout)
+  })
 
-          <span className="text-gray-400 text-[10px] font-mono uppercase overflow-hidden text-ellipsis whitespace-nowrap">{slide.layout_name}</span>
+  const handleRegenerateClick = () => {
+    setShowRegenerateModal(true)
+  }
+
+  const confirmRegenerate = () => {
+    setShowRegenerateModal(false)
+    if (onRegenerate) {
+      onRegenerate(slide.id)
+    }
+  }
+
+  return (
+    <>
+      <div className={`bg-white border-2 border-gray-200 rounded-lg overflow-hidden transition-all cursor-move hover:border-blue-600 hover:shadow-[0_4px_12px_rgba(0,102,204,0.15)] ${isDragging ? 'opacity-40 cursor-grabbing' : ''} ${regenerating ? 'opacity-60' : ''}`}>
+        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex justify-between items-center gap-2">
+          <span className="font-semibold text-blue-600 text-xs whitespace-nowrap">slide {slideNumber}</span>
+
+          <select
+            value={slide.layout_name}
+            onChange={(e) => handleLayoutChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            disabled={regenerating}
+            className="flex-1 px-2 py-1 border border-gray-300 rounded text-[10px] bg-white cursor-pointer hover:border-blue-500 min-w-0 disabled:opacity-50"
+            title="change layout"
+          >
+            {Object.entries(layoutsByCategory).map(([categoryId, layouts]) => {
+              const categoryInfo = availableCategories.find(c => c.id === categoryId)
+              const label = categoryInfo ? categoryInfo.name : categoryId.replace('_', ' ')
+              
+              return (
+                <optgroup key={categoryId} label={label}>
+                  {layouts.map(l => (
+                    <option key={l.name} value={l.name}>
+                      {l.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            })}
+          </select>
+
+          {onRegenerate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleRegenerateClick()
+              }}
+              disabled={regenerating}
+              className="px-2 py-1 bg-purple-600 text-white rounded text-[10px] hover:bg-purple-700 transition-colors flex-shrink-0 disabled:opacity-50"
+              title="use AI to regenerate this slide"
+            >
+              {regenerating ? '...' : 'AI'}
+            </button>
+          )}
+
+          <button 
+            onClick={() => onDelete(slide.id)} 
+            className="text-gray-400 hover:text-red-600 text-sm p-1 flex-shrink-0" 
+            title="delete"
+          >
+            ✕
+          </button>
         </div>
-        <button onClick={() => onDelete(slide.id)} className="text-gray-400 hover:text-red-600 text-sm p-1" title="delete">
-          ✕
-        </button>
-      </div>
 
       <div className="p-4">
         <div className="relative w-full bg-white border border-gray-100 rounded overflow-hidden" style={{ paddingBottom: `${aspectRatio * 100}%` }}>
@@ -142,5 +247,32 @@ export function SlideCard({
         </div>
       </div>
     </div>
+
+    {showRegenerateModal && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowRegenerateModal(false)}>
+        <div className="bg-white rounded-lg p-6 max-w-md mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-semibold mb-3">regenerate slide with AI?</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            the AI will analyze this slide's content and may choose a different layout (including special layouts) 
+            to better present the information. this action cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setShowRegenerateModal(false)}
+              className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50 transition-colors"
+            >
+              cancel
+            </button>
+            <button
+              onClick={confirmRegenerate}
+              className="px-4 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
+            >
+              regenerate
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   )
 }

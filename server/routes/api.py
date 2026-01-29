@@ -50,6 +50,48 @@ def get_rules():
         return jsonify({'error': str(e)}), 500
 
 
+@api_blueprint.route('/toggle-layout-special', methods=['POST'])
+def toggle_layout_special():
+    """toggle whether a layout is marked as special"""
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        layout_name = request_data.get('layout_name')
+        is_special = request_data.get('is_special', False)
+        
+        if not layout_name:
+            return jsonify({'error': 'layout_name is required'}), 400
+        
+        rules = pptx_service.get_stored_rules()
+        layouts = rules.get('layouts', [])
+        
+        found = False
+        for layout in layouts:
+            if layout['name'] == layout_name:
+                layout['is_special'] = is_special
+                found = True
+                break
+        
+        if not found:
+            return jsonify({'error': f'Layout "{layout_name}" not found'}), 404
+        
+        rules['layouts'] = layouts
+        pptx_service.update_stored_rules(rules)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Layout marked as {"special" if is_special else "general"}'
+        })
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @api_blueprint.route('/generate-slide', methods=['POST'])
 def generate_slide():
     try:
@@ -76,30 +118,65 @@ def generate_slide():
 
 @api_blueprint.route('/preprocess-content', methods=['POST'])
 def preprocess_content():
-    """Preprocess raw content into structured slide outlines using Minto Pyramid Principle"""
+    """Preprocess raw content into structured slide outlines with comprehensive information organization"""
     try:
         request_data = request.get_json()
         
         if not request_data:
             return jsonify({'error': 'No data provided'}), 400
         
-        content_text = request_data.get('content_text', '')
-        num_images = request_data.get('num_images', 0)
-        
-        if not content_text or not content_text.strip():
-            return jsonify({'error': 'Content text is required'}), 400
+        content_chunks = request_data.get('content_chunks', None)
+        images = request_data.get('images', [])
+        provided_layouts = request_data.get('layouts', None)
         
         rules = pptx_service.get_stored_rules()
-        layouts = rules.get('layouts', [])
+        layouts = provided_layouts if provided_layouts is not None else rules.get('layouts', [])
         
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
         
-        structure = get_ai_service().preprocess_content_structure(
-            content_text=content_text,
-            layouts=layouts,
-            num_images=num_images
-        )
+        if content_chunks is not None:
+            if not isinstance(content_chunks, list) or len(content_chunks) == 0:
+                return jsonify({'error': 'Content chunks must be a non-empty array'}), 400
+            
+            if not isinstance(images, list):
+                return jsonify({'error': 'Images must be an array'}), 400
+            
+            for i, chunk in enumerate(content_chunks):
+                if not isinstance(chunk, dict):
+                    return jsonify({'error': f'Chunk {i} must be an object'}), 400
+                if 'id' not in chunk or 'text' not in chunk or 'linked_image_ids' not in chunk:
+                    return jsonify({'error': f'Chunk {i} missing required fields (id, text, linked_image_ids)'}), 400
+                
+                for img_id in chunk['linked_image_ids']:
+                    if not any(img.get('id') == img_id for img in images):
+                        return jsonify({'error': f'Chunk {i} references non-existent image ID: {img_id}'}), 400
+            
+            for i, img in enumerate(images):
+                if not isinstance(img, dict):
+                    return jsonify({'error': f'Image {i} must be an object'}), 400
+                if 'id' not in img or 'filename' not in img or 'tags' not in img:
+                    return jsonify({'error': f'Image {i} missing required fields (id, filename, tags)'}), 400
+            
+            structure = get_ai_service().preprocess_with_chunks_and_links(
+                content_chunks=content_chunks,
+                images=images,
+                layouts=layouts,
+                slide_size=rules.get('slide_size')
+            )
+        else:
+            content_text = request_data.get('content_text', '')
+            num_images = request_data.get('num_images', 0)
+            
+            if not content_text or not content_text.strip():
+                return jsonify({'error': 'Content text is required'}), 400
+            
+            structure = get_ai_service().preprocess_content_structure(
+                content_text=content_text,
+                layouts=layouts,
+                num_images=num_images,
+                slide_size=rules.get('slide_size')
+            )
         
         return jsonify({
             'success': True,
@@ -144,12 +221,13 @@ def preview_slides():
         
         slides = structured_content['structure']
         
-        # Store images for later use
         pptx_service.clear_images()
+        image_id_to_index = {}
         for i, img in enumerate(images):
             if not isinstance(img, dict):
                 return jsonify({'error': f'Image {i} must be an object with filename and data'}), 400
             
+            img_id = img.get('id')
             filename = img.get('filename')
             image_data = img.get('data')
             
@@ -157,8 +235,10 @@ def preview_slides():
                 return jsonify({'error': f'Image {i} missing filename or data'}), 400
             
             pptx_service.store_image(filename, image_data)
+            
+            if img_id:
+                image_id_to_index[img_id] = i
         
-        # Validate each slide has complete placeholder information
         for i, slide in enumerate(slides):
             if 'layout_name' not in slide:
                 return jsonify({'error': f'Slide {i+1} missing layout_name'}), 400
@@ -178,6 +258,18 @@ def preview_slides():
             if slide_placeholder_indices != layout_placeholder_indices:
                 missing = layout_placeholder_indices - slide_placeholder_indices
                 extra = slide_placeholder_indices - layout_placeholder_indices
+                
+                print(f"\n❌ PLACEHOLDER MISMATCH - Slide {i+1}")
+                print(f"   Layout: {slide['layout_name']}")
+                print(f"   Expected indices: {sorted(layout_placeholder_indices)}")
+                print(f"   Got indices: {sorted(slide_placeholder_indices)}")
+                print(f"   Layout placeholders:")
+                for ph in layout['placeholders']:
+                    print(f"     - idx={ph['idx']}, type={ph['type']}, name={ph['name']}")
+                print(f"   Slide placeholders:")
+                for ph in slide['placeholders']:
+                    print(f"     - idx={ph['idx']}, type={ph['type']}")
+                
                 error_msg = f'Slide {i+1} placeholder mismatch.'
                 if missing:
                     error_msg += f' Missing indices: {sorted(missing)}.'
@@ -209,6 +301,7 @@ def generate_deck():
         content_text = request_data.get('content_text', '')
         images = request_data.get('images', [])
         slides_spec = request_data.get('slides', [])
+        custom_theme = request_data.get('customTheme', None)
         
         if not content_text and not slides_spec:
             return jsonify({'error': 'Either content_text or slides specification is required'}), 400
@@ -257,10 +350,8 @@ def generate_deck():
                 
                 pptx_service.store_image(filename, image_data)
             
-            # Use slides_spec directly
             slide_specs = slides_spec
         else:
-            # Original flow: generate slides from content
             num_images = len(images)
             has_text_content = bool(content_text and content_text.strip())
             
@@ -299,7 +390,7 @@ def generate_deck():
                 slides_specification=[]
             )
         
-        file_b64 = pptx_service.generate_deck(slide_specs)
+        file_b64 = pptx_service.generate_deck(slide_specs, custom_theme=custom_theme)
         
         return jsonify({
             'success': True,
@@ -313,4 +404,134 @@ def generate_deck():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/regenerate-slide', methods=['POST'])
+def regenerate_slide():
+    """regenerate a single slide using AI with access to all layouts"""
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        slide = request_data.get('slide')
+        images = request_data.get('images', [])
+        provided_layouts = request_data.get('layouts', None)
+        context_slides = request_data.get('context_slides', [])
+        
+        if not slide:
+            return jsonify({'error': 'Slide is required'}), 400
+        
+        rules = pptx_service.get_stored_rules()
+        layouts = provided_layouts if provided_layouts is not None else rules.get('layouts', [])
+        
+        if not layouts:
+            return jsonify({'error': 'No layouts available'}), 400
+        
+        regenerated_slide = get_ai_service().regenerate_single_slide(
+            slide=slide,
+            images=images,
+            layouts=layouts,
+            context_slides=context_slides
+        )
+        
+        return jsonify({
+            'success': True,
+            'slide': regenerated_slide
+        })
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/analyze-image', methods=['POST'])
+def analyze_image():
+    """analyze image content with vision AI"""
+    try:
+        request_data = request.get_json()
+        image_data = request_data.get('image_data')
+        
+        if not image_data:
+            return jsonify({'error': 'image_data required'}), 400
+        
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+        
+        analysis = get_ai_service().analyze_image_content(image_data)
+        
+        return jsonify({
+            'success': True,
+            **analysis
+        })
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/update-layout-category', methods=['POST'])
+def update_layout_category():
+    """update layout category assignment"""
+    try:
+        request_data = request.get_json()
+        layout_name = request_data.get('layout_name')
+        category_id = request_data.get('category_id')
+        
+        rules = pptx_service.get_stored_rules()
+        
+        for layout in rules.get('layouts', []):
+            if layout['name'] == layout_name:
+                layout['category'] = category_id
+                layout['category_confidence'] = 1.0
+                break
+        
+        pptx_service.update_stored_rules(rules)
+        
+        return jsonify({'success': True})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/add-custom-category', methods=['POST'])
+def add_custom_category():
+    """add new custom category to rules"""
+    try:
+        request_data = request.get_json()
+        category_name = request_data.get('category_name')
+        
+        rules = pptx_service.get_stored_rules()
+        categories = rules.get('layoutCategories', [])
+        
+        category_id = category_name.lower().replace(' ', '_')
+        
+        if any(cat['id'] == category_id for cat in categories):
+            return jsonify({'error': 'Category already exists'}), 400
+        
+        categories.append({
+            'id': category_id,
+            'name': category_name,
+            'isPredefined': False
+        })
+        
+        rules['layoutCategories'] = categories
+        pptx_service.update_stored_rules(rules)
+        
+        return jsonify({
+            'success': True,
+            'category': {
+                'id': category_id,
+                'name': category_name,
+                'isPredefined': False
+            }
+        })
+    
+    except Exception as e:
         return jsonify({'error': str(e)}), 500

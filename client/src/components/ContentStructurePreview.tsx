@@ -16,7 +16,7 @@ interface StructureData {
   structure: SlideStructure[]
   deck_summary: {
     total_slides: number
-    pyramid_structure: string
+    flow_description: string
     key_message: string
   }
 }
@@ -60,7 +60,7 @@ export function ContentStructurePreview({
       <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm">
         <p className="font-semibold text-blue-900 mb-1">key message</p>
         <p className="text-blue-800 mb-3">{structure.deck_summary.key_message}</p>
-        <p className="text-gray-600 italic text-xs">{structure.deck_summary.pyramid_structure}</p>
+        <p className="text-gray-600 italic text-xs">{structure.deck_summary.flow_description}</p>
       </div>
 
       <div className="space-y-4 mb-6">

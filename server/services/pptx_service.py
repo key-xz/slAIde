@@ -43,18 +43,36 @@ class PPTXService:
             if len(prs.slides) == 0:
                 raise ValueError('The uploaded presentation has no slides. Please upload a presentation with at least one example slide.')
             
-            layouts = extract_all_slides_as_layouts(prs)
+            extraction_result = extract_all_slides_as_layouts(prs, self.template_path)
+            layouts = extraction_result['layouts']
+            theme_data = extraction_result.get('theme_data')
+            
+            print(f"\n✓ extracted {len(layouts)} rigid layout templates")
+            
+            # STRICT VALIDATION: Fail fast if critical design specs are missing
+            self._validate_complete_extraction(prs, layouts, theme_data)
+            
+            from config import PREDEFINED_LAYOUT_CATEGORIES
+            from services.ai_service import AIService
+            
+            ai_service = AIService()
+            categorization_result = ai_service.categorize_layouts(
+                layouts, 
+                PREDEFINED_LAYOUT_CATEGORIES
+            )
+            
+            all_categories = PREDEFINED_LAYOUT_CATEGORIES + categorization_result['new_categories']
             
             rules = {
                 'slide_size': {
                     'width': prs.slide_width,
                     'height': prs.slide_height
                 },
-                'layouts': layouts,
+                'layouts': categorization_result['layouts'],
+                'layoutCategories': all_categories,
+                'theme_data': theme_data,  # Include complete theme data
                 'extraction_method': 'rigid_slide_templates'
             }
-            
-            print(f"\n✓ extracted {len(layouts)} rigid layout templates")
             
             text_placeholder_count = sum(
                 len([p for p in layout['placeholders'] if p['type'] == 'text'])
@@ -68,6 +86,15 @@ class PPTXService:
             print(f"  total text placeholders: {text_placeholder_count}")
             print(f"  total image placeholders: {image_placeholder_count}")
             
+            # Log theme data extraction
+            if theme_data:
+                if theme_data.get('color_scheme'):
+                    print(f"  ✓ theme: {len(theme_data['color_scheme'])} colors extracted")
+                if theme_data.get('format_scheme'):
+                    print(f"  ✓ theme: format styles extracted")
+                if theme_data.get('theme_raw'):
+                    print(f"  ✓ theme: raw theme XML preserved")
+            
             self.stored_rules = rules
             return rules
             
@@ -79,6 +106,98 @@ class PPTXService:
         if self.stored_rules is None:
             raise ValueError('No rules stored. Please upload a PowerPoint file first.')
         return self.stored_rules
+    
+    def _validate_complete_extraction(self, prs, layouts, theme_data):
+        """
+        Strict validation: Ensure all critical design specifications were successfully extracted.
+        Fails fast if any required styling information is missing.
+        """
+        errors = []
+        
+        # 1. Validate slide dimensions
+        if not prs.slide_width or not prs.slide_height:
+            errors.append("Failed to extract slide dimensions (width/height)")
+        
+        # 2. Validate theme data
+        if not theme_data:
+            errors.append("Failed to extract theme data from presentation")
+        else:
+            # Validate fonts
+            if not theme_data.get('fonts'):
+                errors.append("Failed to extract font information from theme")
+            else:
+                fonts = theme_data['fonts']
+                if not fonts.get('title') or not fonts['title'].get('name'):
+                    errors.append("Failed to extract title font name from theme")
+                if not fonts.get('body') or not fonts['body'].get('name'):
+                    errors.append("Failed to extract body font name from theme")
+            
+            # Validate color scheme
+            if not theme_data.get('color_scheme'):
+                errors.append("Failed to extract color scheme from theme")
+        
+        # 3. Validate layouts
+        if not layouts or len(layouts) == 0:
+            errors.append("No layouts were successfully extracted from presentation")
+        
+        for i, layout in enumerate(layouts):
+            layout_name = layout.get('name', f'Layout {i}')
+            
+            # Validate layout has placeholders
+            if 'placeholders' not in layout:
+                errors.append(f"Layout '{layout_name}': Missing placeholders array")
+                continue
+            
+            # Validate each placeholder has complete properties
+            for ph in layout['placeholders']:
+                ph_idx = ph.get('idx', '?')
+                
+                # Check for required fields
+                if 'type' not in ph:
+                    errors.append(f"Layout '{layout_name}', placeholder {ph_idx}: Missing type")
+                if 'properties' not in ph:
+                    errors.append(f"Layout '{layout_name}', placeholder {ph_idx}: Missing properties")
+                    continue
+                
+                props = ph['properties']
+                
+                # Validate position data
+                if 'position' not in props:
+                    errors.append(f"Layout '{layout_name}', placeholder {ph_idx}: Missing position data")
+                else:
+                    pos = props['position']
+                    required_pos_fields = ['left', 'top', 'width', 'height']
+                    for field in required_pos_fields:
+                        if field not in pos or pos[field] is None:
+                            errors.append(f"Layout '{layout_name}', placeholder {ph_idx}: Missing position.{field}")
+                
+                # For text placeholders, validate font properties
+                if ph.get('type') == 'text':
+                    if 'font_props' not in props:
+                        errors.append(f"Layout '{layout_name}', text placeholder {ph_idx}: Missing font properties")
+                    else:
+                        font_props = props['font_props']
+                        if not font_props.get('name'):
+                            errors.append(f"Layout '{layout_name}', text placeholder {ph_idx}: Missing font name")
+                        if not font_props.get('size'):
+                            errors.append(f"Layout '{layout_name}', text placeholder {ph_idx}: Missing font size")
+        
+        # If any errors found, fail fast
+        if errors:
+            error_message = "❌ TEMPLATE EXTRACTION FAILED - Incomplete design specifications:\n\n"
+            error_message += "\n".join(f"  • {err}" for err in errors)
+            error_message += "\n\nPlease upload a valid PowerPoint template with complete formatting information."
+            error_message += "\nEnsure the template has:"
+            error_message += "\n  - Defined theme with fonts and colors"
+            error_message += "\n  - Properly formatted slide layouts"
+            error_message += "\n  - Text placeholders with font specifications"
+            raise ValueError(error_message)
+        
+        print("  ✅ All critical design specifications validated successfully")
+    
+    def update_stored_rules(self, rules):
+        """update the stored rules (used for modifying layout properties like is_special)"""
+        self.stored_rules = rules
     
     def generate_slide(self, layout_name, inputs):
         if not self.template_path or not os.path.exists(self.template_path):
@@ -145,7 +264,65 @@ class PPTXService:
     def clear_images(self):
         self.uploaded_images = {}
     
-    def generate_deck(self, slide_specs):
+    def _apply_theme_overrides(self, custom_theme):
+        """
+        Apply custom theme overrides to the stored rules.
+        This modifies layout templates to use custom fonts and colors.
+        """
+        if not custom_theme or not self.stored_rules:
+            return
+        
+        custom_fonts = custom_theme.get('fonts', {})
+        custom_colors = custom_theme.get('colors', {})
+        
+        if custom_fonts:
+            print(f"  ✓ overriding fonts:")
+            if 'title' in custom_fonts:
+                print(f"    - title: {custom_fonts['title'].get('name')} {custom_fonts['title'].get('size')}pt")
+            if 'body' in custom_fonts:
+                print(f"    - body: {custom_fonts['body'].get('name')} {custom_fonts['body'].get('size')}pt")
+        
+        if custom_colors:
+            print(f"  ✓ overriding {len(custom_colors)} theme colors")
+        
+        # Update all layout templates with custom theme
+        layouts = self.stored_rules.get('layouts', [])
+        for layout in layouts:
+            for placeholder in layout.get('placeholders', []):
+                props = placeholder.get('properties', {})
+                
+                # Override font properties in text placeholders
+                if placeholder.get('type') == 'text' and 'font_props' in props:
+                    font_props = props['font_props']
+                    
+                    # Determine if this is a title or body based on name/position
+                    is_title = 'title' in placeholder.get('name', '').lower()
+                    
+                    if is_title and 'title' in custom_fonts:
+                        if 'name' in custom_fonts['title']:
+                            font_props['name'] = custom_fonts['title']['name']
+                        if 'size' in custom_fonts['title']:
+                            font_props['size'] = custom_fonts['title']['size']
+                    elif not is_title and 'body' in custom_fonts:
+                        if 'name' in custom_fonts['body']:
+                            font_props['name'] = custom_fonts['body']['name']
+                        if 'size' in custom_fonts['body']:
+                            font_props['size'] = custom_fonts['body']['size']
+                    
+                    # Override color if specified and matches theme color names
+                    if 'color' in font_props and custom_colors:
+                        # For now, apply primary text color (dk1) if available
+                        if 'dk1' in custom_colors:
+                            color_info = custom_colors['dk1']
+                            if color_info.get('type') == 'rgb' and 'value' in color_info:
+                                font_props['color'] = {
+                                    'type': 'rgb',
+                                    'rgb': color_info['value']
+                                }
+        
+        print(f"  ✅ theme overrides applied to {len(layouts)} layouts")
+    
+    def generate_deck(self, slide_specs, custom_theme=None):
         if not self.template_path or not os.path.exists(self.template_path):
             raise ValueError('No template presentation available')
         
@@ -155,15 +332,28 @@ class PPTXService:
         if not isinstance(slide_specs, list):
             raise ValueError(f'slide_specs must be a list, got {type(slide_specs)}')
         
-        prs = Presentation(self.template_path)
+        # Load BOTH the source (for cloning) and target (for output)
+        source_prs = Presentation(self.template_path)
+        target_prs = Presentation(self.template_path)
         
-        for i in range(len(prs.slides) - 1, -1, -1):
-            rId = prs.slides._sldIdLst[i].rId
-            prs.part.drop_rel(rId)
-            del prs.slides._sldIdLst[i]
+        # Clear all slides from target
+        for i in range(len(target_prs.slides) - 1, -1, -1):
+            rId = target_prs.slides._sldIdLst[i].rId
+            target_prs.part.drop_rel(rId)
+            del target_prs.slides._sldIdLst[i]
+        
+        print(f"\n🔄 cloning {len(slide_specs)} slides from template")
+        
+        # Apply custom theme overrides if provided
+        if custom_theme:
+            print(f"\n🎨 applying custom theme overrides...")
+            self._apply_theme_overrides(custom_theme)
         
         layouts = self.stored_rules.get('layouts', [])
         layout_map = {layout['name']: layout for layout in layouts}
+        
+        # Import the cloning utility
+        from utils.slide_cloner import clone_slide_with_content
         
         for i, spec in enumerate(slide_specs):
             if not isinstance(spec, dict):
@@ -175,28 +365,43 @@ class PPTXService:
             print(f"\ngenerating slide {i + 1}: {layout_name}")
             print(f"content items: {len(placeholders_data)}")
             
+            # Debug: show what content we're passing
+            for ph in placeholders_data:
+                ph_idx = ph.get('idx', '?')
+                ph_type = ph.get('type', '?')
+                if ph_type == 'text':
+                    content_preview = ph.get('content', '')[:50]
+                    print(f"  placeholder idx={ph_idx}, type={ph_type}, content='{content_preview}...'")
+                else:
+                    print(f"  placeholder idx={ph_idx}, type={ph_type}")
+            
             if layout_name not in layout_map:
                 print(f"  error: layout '{layout_name}' not found, skipping")
                 continue
             
             layout_template = layout_map[layout_name]
             
+            # Get the source slide index (0-based) from the layout
+            source_slide_index = layout_template.get('layout_index', layout_template.get('slide_number', 1) - 1)
+            
             try:
-                generate_slide_from_template(
-                    prs,
-                    layout_template,
+                # Clone the slide from source template, filling placeholders with new content
+                clone_slide_with_content(
+                    source_prs,
+                    source_slide_index,
+                    target_prs,
                     placeholders_data,
                     self.uploaded_images
                 )
-                print(f"  ✓ slide generated successfully")
+                print(f"  ✓ slide cloned successfully from template slide {source_slide_index + 1}")
             except Exception as e:
-                print(f"  error generating slide: {e}")
+                print(f"  ❌ error cloning slide: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
         
         output = BytesIO()
-        prs.save(output)
+        target_prs.save(output)
         output.seek(0)
         
         return base64.b64encode(output.getvalue()).decode('utf-8')

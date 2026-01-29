@@ -53,3 +53,67 @@ def get_config(env=None):
     if env is None:
         env = os.getenv('FLASK_ENV', 'development')
     return config.get(env, config['default'])
+
+
+PREDEFINED_LAYOUT_CATEGORIES = [
+    {
+        'id': 'title_slide',
+        'name': 'Title Slide',
+        'description': 'presentation opening with title and subtitle',
+        'isPredefined': True
+    },
+    {
+        'id': 'section_divider',
+        'name': 'Section Divider',
+        'description': 'separates major sections, typically minimal text',
+        'isPredefined': True
+    },
+    {
+        'id': 'table_of_contents',
+        'name': 'Table of Contents',
+        'description': 'lists presentation sections or agenda',
+        'isPredefined': True
+    },
+    {
+        'id': 'content_standard',
+        'name': 'Standard Content',
+        'description': 'title + body text, 1-2 text areas',
+        'isPredefined': True
+    },
+    {
+        'id': 'content_with_image',
+        'name': 'Content with Image',
+        'description': 'text and single image side-by-side or stacked',
+        'isPredefined': True
+    },
+    {
+        'id': 'image_focused',
+        'name': 'Image Focused',
+        'description': 'large image with minimal text',
+        'isPredefined': True
+    },
+    {
+        'id': 'multi_image_grid',
+        'name': 'Multi-Image Grid',
+        'description': '2+ images in grid layout',
+        'isPredefined': True
+    },
+    {
+        'id': 'two_column',
+        'name': 'Two Column',
+        'description': 'side-by-side text columns',
+        'isPredefined': True
+    },
+    {
+        'id': 'comparison',
+        'name': 'Comparison',
+        'description': 'compare two concepts side-by-side',
+        'isPredefined': True
+    },
+    {
+        'id': 'closing_slide',
+        'name': 'Closing Slide',
+        'description': 'thank you, contact info, or conclusion',
+        'isPredefined': True
+    }
+]

@@ -132,7 +132,9 @@ def apply_font_properties(font, props):
         
         if 'color' in props:
             color_info = props['color']
-            if 'rgb' in color_info and color_info['rgb']:
+            
+            # Check if we have a valid RGB color
+            if color_info and 'rgb' in color_info and color_info['rgb']:
                 rgb_str = color_info['rgb']
                 if rgb_str and len(rgb_str) >= 6:
                     rgb_hex = rgb_str[:6]
@@ -140,7 +142,11 @@ def apply_font_properties(font, props):
                     g = int(rgb_hex[2:4], 16)
                     b = int(rgb_hex[4:6], 16)
                     font.color.rgb = RGBColor(r, g, b)
-                    print(f"      ✓ applied font color: RGB({r}, {g}, {b}) from '{rgb_str}'")
+                    print(f"      ✓ applied font color: #{rgb_hex}")
+            # If color type is 'None' or invalid, apply default black
+            elif color_info and color_info.get('type') == 'None':
+                font.color.rgb = RGBColor(0, 0, 0)  # Black
+                print(f"      ✓ applied default black color (original was None)")
             elif 'theme_color' in color_info and color_info['theme_color']:
                 print(f"      → theme color detected: {color_info['theme_color']} (preserved)")
     except Exception as e:
@@ -202,6 +208,7 @@ def create_text_shape(slide, shape_props, content):
     text_frame = textbox.text_frame
     
     print(f"      → creating text box at ({left}, {top}) size ({width}x{height})")
+    print(f"      → content to insert: '{content[:100]}...' ({len(content)} chars)")
     
     if 'text_frame_props' in shape_props:
         apply_text_frame_properties(text_frame, shape_props['text_frame_props'])
@@ -214,6 +221,9 @@ def create_text_shape(slide, shape_props, content):
     
     run = p.add_run()
     run.text = content
+    
+    print(f"      → text set on run: '{run.text[:50]}...'")
+    print(f"      → text frame has text: '{text_frame.text[:50] if text_frame.text else 'EMPTY'}...'")
     
     if 'font_props' in shape_props:
         print(f"      → applying font properties: {shape_props['font_props']}")
@@ -230,6 +240,7 @@ def create_text_shape(slide, shape_props, content):
     if 'rotation' in shape_props:
         textbox.rotation = shape_props['rotation']
     
+    print(f"      ✅ textbox complete: has_text={bool(text_frame.text)}, text_length={len(text_frame.text or '')}")
     return textbox
 
 
@@ -256,63 +267,160 @@ def create_image_shape(slide, shape_props, image_data):
 
 def create_static_shape(slide, shape_props):
     shape_type_str = shape_props.get('shape_type', '')
+    shape_name = shape_props.get('name', 'unnamed')
     pos = shape_props['position']
     left = pos['left']
     top = pos['top']
     width = pos['width']
     height = pos['height']
     
+    # Handle design images (logos, backgrounds, decorative elements)
     if 'PICTURE' in shape_type_str:
-        return None
+        if shape_props.get('is_design_image') and 'image_data' in shape_props and shape_props['image_data']:
+            try:
+                image_data = shape_props['image_data']
+                image_bytes = base64.b64decode(image_data)
+                image_stream = BytesIO(image_bytes)
+                
+                picture = slide.shapes.add_picture(image_stream, left, top, width, height)
+                
+                if 'rotation' in shape_props:
+                    picture.rotation = shape_props['rotation']
+                
+                print(f"      ✓ preserved design image '{shape_name}'")
+                return picture
+            except Exception as e:
+                print(f"      ✗ failed to add design image '{shape_name}': {e}")
+                return None
+        else:
+            print(f"      ⊘ skipping picture '{shape_name}' (no data or not design image)")
+            return None
     
-    shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, left, top, width, height)
+    # Handle text boxes (static text content)
+    if 'TEXT_BOX' in shape_type_str:
+        try:
+            textbox = slide.shapes.add_textbox(left, top, width, height)
+            
+            if 'text_frame_props' in shape_props:
+                apply_text_frame_properties(textbox.text_frame, shape_props['text_frame_props'])
+            
+            # Try to preserve any static text content
+            # (placeholder text won't be here since placeholders are handled separately)
+            
+            if 'fill_props' in shape_props:
+                apply_fill_properties(textbox, shape_props['fill_props'])
+            if 'line_props' in shape_props:
+                apply_line_properties(textbox, shape_props['line_props'])
+            if 'rotation' in shape_props:
+                textbox.rotation = shape_props['rotation']
+            
+            print(f"      ✓ preserved text box '{shape_name}'")
+            return textbox
+        except Exception as e:
+            print(f"      ✗ failed to add text box '{shape_name}': {e}")
+            return None
     
-    if 'fill_props' in shape_props:
-        apply_fill_properties(shape, shape_props['fill_props'])
-    if 'line_props' in shape_props:
-        apply_line_properties(shape, shape_props['line_props'])
-    if 'rotation' in shape_props:
-        shape.rotation = shape_props['rotation']
+    # Handle auto shapes (rectangles, circles, etc.)
+    if 'AUTO_SHAPE' in shape_type_str or 'SHAPE' in shape_type_str:
+        try:
+            # Default to rectangle for now - would need shape type mapping for specific shapes
+            shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, left, top, width, height)
+            
+            if 'fill_props' in shape_props:
+                apply_fill_properties(shape, shape_props['fill_props'])
+            if 'line_props' in shape_props:
+                apply_line_properties(shape, shape_props['line_props'])
+            if 'rotation' in shape_props:
+                shape.rotation = shape_props['rotation']
+            
+            print(f"      ✓ preserved shape '{shape_name}'")
+            return shape
+        except Exception as e:
+            print(f"      ✗ failed to add shape '{shape_name}': {e}")
+            return None
     
-    return shape
+    # For unsupported types, log and skip
+    print(f"      ⊘ skipping unsupported shape type '{shape_name}' [{shape_type_str}]")
+    return None
 
 
 def generate_slide_from_template(presentation, layout_template, placeholder_contents, uploaded_images):
-    layout_idx = layout_template.get('layout_index', 0)
+    """
+    Generate a slide by recreating it from our extracted template.
     
-    if layout_idx < len(presentation.slide_layouts):
-        slide_layout = presentation.slide_layouts[layout_idx]
-    else:
-        slide_layout = presentation.slide_layouts[0]
-        
+    CRITICAL: We use a BLANK layout and rebuild everything ourselves because:
+    - We extracted from actual slides (presentation.slides[N])
+    - Not from master layouts (presentation.slide_layouts[N])
+    - Using master layouts gives us wrong/missing design elements
+    """
+    # Use the blankest layout available (usually index 6 is "Blank" but not always)
+    # Try to find a blank layout, otherwise use the last one
+    slide_layout = None
+    for layout in presentation.slide_layouts:
+        if 'blank' in layout.name.lower():
+            slide_layout = layout
+            break
+    
+    if slide_layout is None:
+        # Fallback: use the layout with the fewest placeholders (most blank)
+        slide_layout = min(presentation.slide_layouts, 
+                          key=lambda l: len([s for s in l.placeholders]))
+    
+    print(f"    using layout: '{slide_layout.name}' to build from scratch")
     slide = presentation.slides.add_slide(slide_layout)
     
-    placeholder_map = {}
-    for shape in slide.placeholders:
-        placeholder_map[shape.placeholder_format.idx] = shape
-    
-    for shape in list(slide.shapes):
+    # CRITICAL: Remove ALL existing shapes from the blank layout
+    # We'll rebuild everything from our extracted template
+    shapes_to_remove = list(slide.shapes)
+    for shape in shapes_to_remove:
         sp = shape.element
         sp.getparent().remove(sp)
     
+    print(f"    removed {len(shapes_to_remove)} default shapes, starting fresh")
+    
+    # Since we removed all shapes, we need to create everything from scratch
+    print(f"    recreating {len(layout_template['placeholders'])} placeholders from template...")
+    print(f"    received {len(placeholder_contents)} content items")
+    
     content_map = {item['idx']: item for item in placeholder_contents}
     
+    # Debug: show what content we have
+    print(f"    content_map keys: {list(content_map.keys())}")
+    for idx, item in content_map.items():
+        item_type = item.get('type', 'unknown')
+        if item_type == 'text':
+            preview = item.get('content', '')[:30]
+            print(f"      idx={idx}: type={item_type}, preview='{preview}...'")
+        else:
+            print(f"      idx={idx}: type={item_type}")
+    
+    # Create all placeholders from our extracted template
     for placeholder_def in layout_template['placeholders']:
         idx = placeholder_def['idx']
-        real_pptx_idx = placeholder_def.get('real_pptx_idx')
         ph_type = placeholder_def['type']
         shape_props = placeholder_def['properties']
         
+        print(f"    processing placeholder idx={idx}, type={ph_type}")
+        
         if idx not in content_map:
-            print(f"    warning: no content for placeholder idx={idx}")
+            print(f"    ⚠️  WARNING: no content provided for placeholder idx={idx}")
             continue
         
         content_item = content_map[idx]
+        content_type = content_item.get('type')
         
-        if ph_type == 'text' and content_item.get('type') == 'text':
+        print(f"      content_item type: {content_type}")
+        
+        if ph_type == 'text' and content_type == 'text':
             content = content_item.get('content', '')
-            print(f"    creating text placeholder idx={idx} (real_idx={real_pptx_idx}): {content[:50]}...")
-            create_text_shape(slide, shape_props, content)
+            print(f"      ✓ creating TEXT shape with {len(content)} chars: '{content[:50]}...'")
+            result = create_text_shape(slide, shape_props, content)
+            if result:
+                print(f"      ✅ text shape created successfully")
+            else:
+                print(f"      ❌ text shape creation returned None")
+        elif ph_type != content_type:
+            print(f"      ❌ TYPE MISMATCH: placeholder expects {ph_type} but content is {content_type}")
         
         elif ph_type == 'image' and content_item.get('type') == 'image':
             image_index = content_item.get('image_index')
@@ -321,14 +429,25 @@ def generate_slide_from_template(presentation, layout_template, placeholder_cont
                 if 0 <= image_index < len(image_filenames):
                     filename = image_filenames[image_index]
                     image_data = uploaded_images[filename]
-                    print(f"    creating image placeholder idx={idx} (real_idx={real_pptx_idx}): {filename}")
+                    print(f"    creating image placeholder idx={idx}: {filename}")
                     create_image_shape(slide, shape_props, image_data)
                 else:
                     print(f"    error: image_index {image_index} out of range")
             else:
                 print(f"    error: no image_index for image placeholder")
     
-    for static_shape_props in layout_template.get('shapes', []):
-        create_static_shape(slide, static_shape_props)
+    # Recreate all static shapes (design elements, backgrounds, etc.)
+    static_shapes = layout_template.get('shapes', [])
+    if static_shapes:
+        print(f"    recreating {len(static_shapes)} static shapes...")
+        for static_shape_props in static_shapes:
+            create_static_shape(slide, static_shape_props)
+    else:
+        print(f"    no static shapes to recreate")
+    
+    # Summary
+    final_shape_count = len(list(slide.shapes))
+    print(f"    ✅ slide complete: {final_shape_count} total shapes")
+    print(f"       ({len(layout_template['placeholders'])} placeholders + {len(static_shapes)} static)")
     
     return slide

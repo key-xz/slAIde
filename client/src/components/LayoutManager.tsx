@@ -1,34 +1,73 @@
 import type { StylingRules, Layout } from '../types'
+import { LayoutCategoryManager } from './LayoutCategoryManager'
 
 interface LayoutManagerProps {
   rules: StylingRules
   onDeleteLayout: (layoutName: string) => void
+  onCategoryChange: (layoutName: string, categoryId: string) => void
+  onAddCustomCategory: (categoryName: string) => void
 }
 
-export function LayoutManager({ rules, onDeleteLayout }: LayoutManagerProps) {
+export function LayoutManager({ rules, onDeleteLayout, onCategoryChange, onAddCustomCategory }: LayoutManagerProps) {
   const aspectRatio = rules.slide_size.height / rules.slide_size.width
+  const availableCategories = rules.layoutCategories || []
+
+  const categoryCounts = rules.layouts.reduce((acc, layout) => {
+    const cat = layout.category || 'uncategorized'
+    acc[cat] = (acc[cat] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
 
   return (
     <div className="my-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900">layouts ({rules.layouts.length})</h3>
+        <div className="text-xs text-gray-500">
+          {Object.entries(categoryCounts).slice(0, 3).map(([cat, count]) => (
+            <span key={cat}>{count} {cat} · </span>
+          ))}
+          {Object.keys(categoryCounts).length > 3 && '...'}
+        </div>
+      </div>
+      <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-gray-700">
+        <strong>AI-categorized:</strong> layouts are semantically categorized by AI into groups like title slides, 
+        dividers, content slides, etc. You can manually adjust categories or add custom ones.
       </div>
       
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6">
-        {rules.layouts.map((layout: Layout, idx: number) => (
-          <div key={idx} className="group bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-blue-400 transition-all shadow-sm">
-            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-              <span className="text-[10px] font-mono text-gray-500 uppercase truncate pr-4" title={layout.name}>
-                {layout.name}
-              </span>
-              <button 
-                onClick={() => onDeleteLayout(layout.name)}
-                className="text-gray-400 hover:text-red-600 transition-colors p-1"
-                title="remove layout"
-              >
-                ✕
-              </button>
-            </div>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6">
+        {rules.layouts.map((layout: Layout, idx: number) => {
+          const categoryInfo = availableCategories.find(c => c.id === layout.category)
+          
+          return (
+            <div key={idx} className="group bg-white border-2 border-gray-200 rounded-lg overflow-hidden transition-all shadow-sm hover:border-blue-400">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1 min-w-0 pr-2">
+                    <div className="text-[10px] font-mono text-gray-500 uppercase truncate mb-1" title={layout.name}>
+                      {layout.name}
+                    </div>
+                    {categoryInfo && (
+                      <div className="text-[9px] text-blue-600 font-medium">
+                        {categoryInfo.name}
+                      </div>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => onDeleteLayout(layout.name)}
+                    className="text-gray-400 hover:text-red-600 transition-colors p-1 flex-shrink-0"
+                    title="remove layout"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                <LayoutCategoryManager
+                  layout={layout}
+                  availableCategories={availableCategories}
+                  onCategoryChange={onCategoryChange}
+                  onAddCustomCategory={onAddCustomCategory}
+                />
+              </div>
             
             <div className="p-4">
               <div 
@@ -36,7 +75,7 @@ export function LayoutManager({ rules, onDeleteLayout }: LayoutManagerProps) {
                 style={{ paddingBottom: `${aspectRatio * 100}%` }}
               >
                 <div className="absolute top-0 left-0 w-full h-full">
-                  {layout.shapes?.map((shape: any, sIdx: number) => {
+                  {(layout.shapes || []).map((shape: any, sIdx: number) => {
                     const slideWidth = rules.slide_size.width
                     const slideHeight = rules.slide_size.height
                     
@@ -96,7 +135,8 @@ export function LayoutManager({ rules, onDeleteLayout }: LayoutManagerProps) {
               </div>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

@@ -1,5 +1,5 @@
 import { config, API_ENDPOINTS } from '../config'
-import type { StylingRules, PlaceholderInput } from '../types'
+import type { StylingRules, PlaceholderInput, TaggedImage, TextChunk } from '../types'
 
 export class ApiError extends Error {
   constructor(
@@ -130,7 +130,8 @@ export async function generateSlidePreview(
 
 export async function generateDeckFromSlides(
   slides: any[],
-  images: Array<{ filename: string; data: string }>
+  images: Array<{ filename: string; data: string }>,
+  customTheme?: any
 ): Promise<{ success: boolean; message: string; file: string; slides_count: number }> {
   return fetchApi(API_ENDPOINTS.generateDeck, {
     method: 'POST',
@@ -141,6 +142,125 @@ export async function generateDeckFromSlides(
       content_text: '',
       images,
       slides,
+      customTheme,
     }),
+  })
+}
+
+export async function preprocessContentWithLinks(
+  chunks: TextChunk[],
+  images: TaggedImage[],
+  layouts: any[]
+): Promise<{ success: boolean; structure: any }> {
+  return fetchApi('/api/preprocess-content', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content_chunks: chunks.map(chunk => ({
+        id: chunk.id,
+        text: chunk.text,
+        linked_image_ids: chunk.linkedImageIds,
+      })),
+      images: images.map(img => ({
+        id: img.id,
+        filename: img.filename,
+        data: img.data,
+        tags: img.tags,
+      })),
+      layouts,
+    }),
+  })
+}
+
+export async function generateSlidePreviewWithLinks(
+  structuredContent: any,
+  images: TaggedImage[],
+  layouts: any[]
+): Promise<{ slides: any[] }> {
+  return fetchApi('/api/preview-slides', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      structured_content: structuredContent,
+      images: images.map(img => ({
+        id: img.id,
+        filename: img.filename,
+        data: img.data,
+        tags: img.tags,
+      })),
+      layouts,
+    }),
+  })
+}
+
+export async function toggleLayoutSpecial(
+  layoutName: string,
+  isSpecial: boolean
+): Promise<{ success: boolean; message: string }> {
+  return fetchApi('/api/toggle-layout-special', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      layout_name: layoutName,
+      is_special: isSpecial,
+    }),
+  })
+}
+
+export async function regenerateSingleSlide(
+  slide: any,
+  images: TaggedImage[],
+  layouts: any[],
+  contextSlides: any[]
+): Promise<{ success: boolean; slide: any }> {
+  return fetchApi('/api/regenerate-slide', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      slide: {
+        layout_name: slide.layout_name,
+        placeholders: slide.placeholders,
+      },
+      images: images.map(img => ({
+        id: img.id,
+        filename: img.filename,
+        data: img.data,
+        tags: img.tags,
+      })),
+      layouts,
+      context_slides: contextSlides,
+    }),
+  })
+}
+
+export async function analyzeImage(imageData: string) {
+  return fetchApi('/api/analyze-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_data: imageData })
+  })
+}
+
+export async function updateLayoutCategory(layoutName: string, categoryId: string) {
+  return fetchApi('/api/update-layout-category', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ layout_name: layoutName, category_id: categoryId })
+  })
+}
+
+export async function addCustomCategory(categoryName: string) {
+  return fetchApi('/api/add-custom-category', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category_name: categoryName })
   })
 }

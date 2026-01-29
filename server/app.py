@@ -11,7 +11,13 @@ def create_app(config_name=None):
     app.config.from_object(config_class)
     config_class.init_app(app)
     
-    CORS(app, origins=app.config['CORS_ORIGINS'])
+    CORS(app, 
+         origins=app.config['CORS_ORIGINS'],
+         allow_headers=['Content-Type', 'Authorization'],
+         expose_headers=['Content-Type'],
+         supports_credentials=True,
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+    
     app.register_blueprint(api_blueprint)
     
     return app

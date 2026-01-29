@@ -1,18 +1,47 @@
 import { useState } from 'react'
-import type { SlideSpec, StylingRules } from '../types'
+import type { SlideSpec, StylingRules, ThemeSettings } from '../types'
 import { SlideCard } from './SlideCard'
+import { ThemeCustomizer } from './ThemeCustomizer'
 
 interface SlideEditorProps {
   slides: SlideSpec[]
   rules: StylingRules
   onSlidesUpdate: (slides: SlideSpec[]) => void
+  onRulesUpdate: (rules: StylingRules) => void
   onGenerate: (slides: SlideSpec[]) => void
+  onRegenerateSlide?: (slideId: string) => void
   generating: boolean
+  regeneratingSlideId?: string | null
 }
 
-export function SlideEditor({ slides, rules, onSlidesUpdate, onGenerate, generating }: SlideEditorProps) {
+export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGenerate, onRegenerateSlide, generating, regeneratingSlideId }: SlideEditorProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+
+  // Get current theme from rules or use defaults
+  const getCurrentTheme = (): ThemeSettings => {
+    if (rules.customTheme) {
+      return rules.customTheme
+    }
+    
+    // Build from extracted theme_data
+    const themeData = rules.theme_data
+    return {
+      fonts: themeData?.fonts || {
+        title: { name: 'Calibri', size: 44 },
+        body: { name: 'Calibri', size: 18 }
+      },
+      colors: themeData?.color_scheme || {}
+    }
+  }
+
+  const handleThemeUpdate = (newTheme: ThemeSettings) => {
+    const updatedRules = {
+      ...rules,
+      customTheme: newTheme
+    }
+    onRulesUpdate(updatedRules)
+  }
 
   const handleSlideUpdate = (slideId: string, updatedSlide: SlideSpec) => {
     const updatedSlides = slides.map(s => (s.id === slideId ? updatedSlide : s))
@@ -63,7 +92,13 @@ export function SlideEditor({ slides, rules, onSlidesUpdate, onGenerate, generat
         </button>
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6">
+      {/* Theme Customization Section */}
+      <ThemeCustomizer
+        currentTheme={getCurrentTheme()}
+        onThemeUpdate={handleThemeUpdate}
+      />
+
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mt-6">
         {slides.map((slide, index) => {
           const layout = rules.layouts.find(l => l.name === slide.layout_name)
           return (
@@ -83,7 +118,9 @@ export function SlideEditor({ slides, rules, onSlidesUpdate, onGenerate, generat
                 rules={rules}
                 onUpdate={handleSlideUpdate}
                 onDelete={handleSlideDelete}
+                onRegenerate={onRegenerateSlide}
                 isDragging={draggedIndex === index}
+                regenerating={regeneratingSlideId === slide.id}
               />
             </div>
           )

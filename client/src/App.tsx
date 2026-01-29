@@ -24,13 +24,18 @@ function App() {
     previewLoading,
     contentStructure,
     preprocessing,
+    regeneratingSlideId,
     handleFileChange,
     handleUpload,
     handlePreprocessContent,
     handleGenerateFromStructure,
     handleGenerateDeck,
     handleDeleteLayout,
+    handleCategoryChange,
+    handleAddCustomCategory,
+    handleRegenerateSlide,
     setSlides,
+    setRules,
     setContentStructure,
   } = useSlideGenerator()
 
@@ -73,7 +78,7 @@ function App() {
               onUpload={handleUpload}
             />
             {error && <ErrorDisplay error={error} />}
-            {rules && <LayoutManager rules={rules} onDeleteLayout={handleDeleteLayout} />}
+            {rules && <LayoutManager rules={rules} onDeleteLayout={handleDeleteLayout} onCategoryChange={handleCategoryChange} onAddCustomCategory={handleAddCustomCategory} />}
           </div>
         )}
 
@@ -118,8 +123,11 @@ function App() {
                     slides={slides}
                     rules={rules}
                     onSlidesUpdate={setSlides}
+                    onRulesUpdate={setRules}
                     onGenerate={handleGenerateDeck}
+                    onRegenerateSlide={handleRegenerateSlide}
                     generating={generating}
+                    regeneratingSlideId={regeneratingSlideId}
                   />
                 )}
 
