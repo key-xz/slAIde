@@ -33,7 +33,6 @@ export function SlideCard({
   const getPlaceholderStyle = (placeholder: any) => {
     const slideWidth = rules.slide_size.width
     const slideHeight = rules.slide_size.height
-    const scale = 0.4 // Scale down for preview
     
     return {
       position: 'absolute' as const,
@@ -48,13 +47,13 @@ export function SlideCard({
     return (
       <div className={`bg-white border-2 border-gray-200 rounded-lg overflow-hidden transition-all cursor-move ${isDragging ? 'opacity-40 cursor-grabbing' : ''}`}>
         <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-          <span className="font-semibold text-blue-600 text-sm">Slide {slideNumber}</span>
+          <span className="font-semibold text-blue-600 text-sm">slide {slideNumber}</span>
           <button onClick={() => onDelete(slide.id)} className="bg-red-600 text-white border-none rounded w-7 h-7 flex items-center justify-center cursor-pointer text-lg leading-none transition-colors hover:bg-red-700 flex-shrink-0">
             ✕
           </button>
         </div>
         <div className="p-4">
-          <p className="text-red-600 text-sm p-4 text-center">Layout "{slide.layout_name}" not found</p>
+          <p className="text-red-600 text-sm p-4 text-center">layout "{slide.layout_name}" not found</p>
         </div>
       </div>
     )
@@ -64,18 +63,19 @@ export function SlideCard({
 
   return (
     <div className={`bg-white border-2 border-gray-200 rounded-lg overflow-hidden transition-all cursor-move hover:border-blue-600 hover:shadow-[0_4px_12px_rgba(0,102,204,0.15)] ${isDragging ? 'opacity-40 cursor-grabbing' : ''}`}>
-      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-        <div className="flex gap-4 items-center flex-1">
-          <span className="font-semibold text-blue-600 text-sm">Slide {slideNumber}</span>
-          <span className="text-gray-500 text-xs overflow-hidden text-ellipsis whitespace-nowrap">{slide.layout_name}</span>
+      <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+        <div className="flex gap-3 items-center flex-1">
+          <span className="font-semibold text-blue-600 text-xs">slide {slideNumber}</span>
+
+          <span className="text-gray-400 text-[10px] font-mono uppercase overflow-hidden text-ellipsis whitespace-nowrap">{slide.layout_name}</span>
         </div>
-        <button onClick={() => onDelete(slide.id)} className="bg-red-600 text-white border-none rounded w-7 h-7 flex items-center justify-center cursor-pointer text-lg leading-none transition-colors hover:bg-red-700 flex-shrink-0" title="Delete slide">
+        <button onClick={() => onDelete(slide.id)} className="text-gray-400 hover:text-red-600 text-sm p-1" title="delete">
           ✕
         </button>
       </div>
 
       <div className="p-4">
-        <div className="relative w-full bg-white border border-gray-200 rounded overflow-hidden shadow-[0_2px_4px_rgba(0,0,0,0.05)]" style={{ paddingBottom: `${aspectRatio * 100}%` }}>
+        <div className="relative w-full bg-white border border-gray-100 rounded overflow-hidden" style={{ paddingBottom: `${aspectRatio * 100}%` }}>
           <div className="absolute top-0 left-0 w-full h-full">
             {slide.placeholders.map(placeholder => {
               const layoutPlaceholder = layout.placeholders.find(p => p.idx === placeholder.idx)
@@ -89,13 +89,13 @@ export function SlideCard({
                 return (
                   <div
                     key={placeholder.idx}
-                    className="border border-dashed border-gray-300 flex items-center justify-center overflow-hidden cursor-text p-2 hover:border-blue-600 hover:bg-blue-600/5"
+                    className="border border-dashed border-gray-200 flex items-center justify-center overflow-hidden cursor-text p-1 hover:border-blue-400 hover:bg-blue-50/30"
                     style={style}
                     onClick={() => !isCurrentlyEditing && setIsEditing(placeholder.idx)}
                   >
                     {isCurrentlyEditing ? (
                       <textarea
-                        className="w-full h-full border-none outline-none resize-none text-xs leading-snug p-0 bg-blue-600/10"
+                        className="w-full h-full border-none outline-none resize-none text-[10px] leading-tight p-0 bg-blue-50"
                         value={placeholder.content || ''}
                         onChange={(e) => {
                           const updatedPlaceholders = slide.placeholders.map(ph =>
@@ -112,8 +112,8 @@ export function SlideCard({
                         autoFocus
                       />
                     ) : (
-                      <div className="w-full h-full overflow-auto text-xs leading-snug text-gray-900 whitespace-pre-wrap break-words">
-                        {placeholder.content || 'Click to edit'}
+                      <div className="w-full h-full overflow-auto text-[10px] leading-tight text-gray-800 whitespace-pre-wrap break-words">
+                        {placeholder.content || '...'}
                       </div>
                     )}
                   </div>
@@ -124,13 +124,13 @@ export function SlideCard({
                 return (
                   <div
                     key={placeholder.idx}
-                    className="border border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50"
+                    className="border border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50/50"
                     style={style}
                   >
                     {placeholder.imageData ? (
-                      <img src={placeholder.imageData} alt={`Image ${placeholder.image_index}`} className="w-full h-full object-contain" />
+                      <img src={placeholder.imageData} alt="" className="w-full h-full object-contain" />
                     ) : (
-                      <div className="text-gray-400 text-xs text-center">Image {placeholder.image_index}</div>
+                      <div className="text-gray-300 text-[8px]">img</div>
                     )}
                   </div>
                 )

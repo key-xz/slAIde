@@ -31,6 +31,7 @@ class PPTXService:
     
     def extract_rules_from_file(self, file_storage):
         self.cleanup_template()
+        self.uploaded_images = {}
         
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as tmp:
             file_storage.save(tmp.name)

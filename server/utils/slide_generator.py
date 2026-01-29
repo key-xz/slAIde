@@ -146,24 +146,33 @@ def create_text_shape(slide, shape_props, content):
     width = pos['width']
     height = pos['height']
     
+    # Check if this was originally a placeholder
+    real_idx = shape_props.get('placeholder_idx', -1)
+    
+    # If it's a placeholder, we should try to add it as one if possible
+    # but add_textbox is more reliable for exact positioning
     textbox = slide.shapes.add_textbox(left, top, width, height)
     text_frame = textbox.text_frame
     
+    # Strictly enforce word wrap and margins from template
     if 'text_frame_props' in shape_props:
         apply_text_frame_properties(text_frame, shape_props['text_frame_props'])
     
     text_frame.clear()
     p = text_frame.paragraphs[0]
     
+    # Strictly enforce paragraph alignment and spacing
     if 'paragraph_props' in shape_props:
         apply_paragraph_properties(p, shape_props['paragraph_props'])
     
     run = p.add_run()
     run.text = content
     
+    # Strictly enforce font name, size, color, bold, italic
     if 'font_props' in shape_props:
         apply_font_properties(run.font, shape_props['font_props'])
     
+    # Strictly enforce fill and line (border)
     if 'fill_props' in shape_props:
         apply_fill_properties(textbox, shape_props['fill_props'])
     
@@ -198,20 +207,68 @@ def create_image_shape(slide, shape_props, image_data):
 
 
 def create_static_shape(slide, shape_props):
-    pass
+    shape_type_str = shape_props.get('shape_type', '')
+    pos = shape_props['position']
+    left = pos['left']
+    top = pos['top']
+    width = pos['width']
+    height = pos['height']
+    
+    # Map string shape type to MSO_SHAPE_TYPE if possible
+    # This is a bit tricky as shape_type is stored as a string like 'PICTURE (13)'
+    
+    if 'PICTURE' in shape_type_str:
+        # We don't have the original image data for static pictures easily
+        # but we can try to add a placeholder or skip
+        return None
+        
+    # Default to a rectangle for unknown shapes, or specific ones if we can identify them
+    shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, left, top, width, height)
+    
+    if 'fill_props' in shape_props:
+        apply_fill_properties(shape, shape_props['fill_props'])
+    if 'line_props' in shape_props:
+        apply_line_properties(shape, shape_props['line_props'])
+    if 'rotation' in shape_props:
+        shape.rotation = shape_props['rotation']
+        
+    # If it has text, add it
+    if shape_props.get('content_type') == 'text' and 'text_frame_props' in shape_props:
+        # Static text
+        pass # To be implemented if needed
+        
+    return shape
 
 
 def generate_slide_from_template(presentation, layout_template, placeholder_contents, uploaded_images):
-    slide = presentation.slides.add_slide(presentation.slide_layouts[0])
+    # Use the layout index to get the actual layout from the template
+    layout_idx = layout_template.get('layout_index', 0)
     
-    for shape in slide.shapes:
+    # Try to find the corresponding slide layout in the presentation
+    if layout_idx < len(presentation.slide_layouts):
+        slide_layout = presentation.slide_layouts[layout_idx]
+    else:
+        slide_layout = presentation.slide_layouts[0]
+        
+    slide = presentation.slides.add_slide(slide_layout)
+    
+    # Map of real PPTX idx to placeholder shape on the new slide
+    placeholder_map = {}
+    for shape in slide.placeholders:
+        placeholder_map[shape.placeholder_format.idx] = shape
+    
+    # Remove all default shapes from the new slide to start with a clean slate
+    # but keep the background from the layout
+    for shape in list(slide.shapes):
         sp = shape.element
         sp.getparent().remove(sp)
     
     content_map = {item['idx']: item for item in placeholder_contents}
     
+    # 1. Create all placeholders (text and image)
     for placeholder_def in layout_template['placeholders']:
         idx = placeholder_def['idx']
+        real_pptx_idx = placeholder_def.get('real_pptx_idx')
         ph_type = placeholder_def['type']
         shape_props = placeholder_def['properties']
         
@@ -221,9 +278,10 @@ def generate_slide_from_template(presentation, layout_template, placeholder_cont
         
         content_item = content_map[idx]
         
+        # Deterministically use the position and sizing from shape_props
         if ph_type == 'text' and content_item.get('type') == 'text':
             content = content_item.get('content', '')
-            print(f"    creating text placeholder idx={idx}: {content[:50]}...")
+            print(f"    creating text placeholder idx={idx} (real_idx={real_pptx_idx}): {content[:50]}...")
             create_text_shape(slide, shape_props, content)
         
         elif ph_type == 'image' and content_item.get('type') == 'image':
@@ -233,14 +291,15 @@ def generate_slide_from_template(presentation, layout_template, placeholder_cont
                 if 0 <= image_index < len(image_filenames):
                     filename = image_filenames[image_index]
                     image_data = uploaded_images[filename]
-                    print(f"    creating image placeholder idx={idx}: {filename}")
+                    print(f"    creating image placeholder idx={idx} (real_idx={real_pptx_idx}): {filename}")
                     create_image_shape(slide, shape_props, image_data)
                 else:
                     print(f"    error: image_index {image_index} out of range")
             else:
                 print(f"    error: no image_index for image placeholder")
     
-    for static_shape in layout_template.get('shapes', []):
-        pass
+    # 2. Create all static shapes from the template slide
+    for static_shape_props in layout_template.get('shapes', []):
+        create_static_shape(slide, static_shape_props)
     
     return slide

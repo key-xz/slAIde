@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSlideGenerator } from './hooks/useSlideGenerator'
 import { FileUploadSection } from './components/FileUploadSection'
 import { BulkContentUpload } from './components/BulkContentUpload'
+import { ContentStructurePreview } from './components/ContentStructurePreview'
 import { SlideEditor } from './components/SlideEditor'
 import { DownloadSection } from './components/DownloadSection'
 import { RulesViewer } from './components/RulesViewer'
@@ -21,11 +22,16 @@ function App() {
     generatedFile,
     slides,
     previewLoading,
+    contentStructure,
+    preprocessing,
     handleFileChange,
     handleUpload,
+    handlePreprocessContent,
+    handleGenerateFromStructure,
     handleGeneratePreview,
     handleGenerateDeck,
     setSlides,
+    setContentStructure,
   } = useSlideGenerator()
 
   return (
@@ -59,8 +65,7 @@ function App() {
       <div className="flex-1 overflow-y-auto p-8">
         {activeTab === 'assets' && (
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-xl font-semibold mb-2">Upload PowerPoint Template</h2>
-            <p className="text-gray-500 mb-6">Upload a .pptx template to extract layouts and styling rules</p>
+            <h2 className="text-xl font-semibold mb-6">Upload Template</h2>
             <FileUploadSection
               file={file}
               loading={loading}
@@ -74,28 +79,39 @@ function App() {
 
         {activeTab === 'generate' && (
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-xl font-semibold mb-4">Generate Slide Deck</h2>
-            {!rules && (
+            {!rules ? (
               <p className="p-4 bg-blue-50 border border-blue-200 rounded text-blue-800 my-4">
-                Please upload a PowerPoint template in the Template Upload tab first.
+                Please upload a template first.
               </p>
-            )}
-            
-            {rules && (
+            ) : (
               <>
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-8">
-                  <p className="text-blue-900 leading-relaxed">
-                    <strong>How to use:</strong> Type or upload content, add images, then generate slide previews.
-                    Drag to reorder, click text to edit, then generate the final PowerPoint.
-                  </p>
-                </div>
-                
-                <BulkContentUpload
-                  onGenerate={handleGeneratePreview}
-                  generating={previewLoading}
-                />
+                {!contentStructure && (
+                  <BulkContentUpload
+                    onPreprocess={handlePreprocessContent}
+                    preprocessing={preprocessing}
+                  />
+                )}
 
                 {error && <ErrorDisplay error={error} />}
+                
+                {contentStructure && !slides.length && (
+                  <>
+                    <ContentStructurePreview
+                      structure={contentStructure}
+                      onApprove={handleGenerateFromStructure}
+                      onEdit={(editedStructure) => {
+                        setContentStructure(editedStructure)
+                      }}
+                      loading={previewLoading}
+                    />
+                    <button
+                      onClick={() => setContentStructure(null)}
+                      className="mt-4 px-4 py-2 text-gray-400 hover:text-gray-600 underline text-sm"
+                    >
+                      ← Back
+                    </button>
+                  </>
+                )}
                 
                 {slides.length > 0 && rules && (
                   <SlideEditor

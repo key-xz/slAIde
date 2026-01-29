@@ -74,9 +74,9 @@ def generate_slide():
         return jsonify({'error': str(e)}), 500
 
 
-@api_blueprint.route('/preview-slides', methods=['POST'])
-def preview_slides():
-    """Generate slide specifications without creating the PowerPoint file"""
+@api_blueprint.route('/preprocess-content', methods=['POST'])
+def preprocess_content():
+    """Preprocess raw content into structured slide outlines using Minto Pyramid Principle"""
     try:
         request_data = request.get_json()
         
@@ -84,13 +84,50 @@ def preview_slides():
             return jsonify({'error': 'No data provided'}), 400
         
         content_text = request_data.get('content_text', '')
+        num_images = request_data.get('num_images', 0)
+        
+        if not content_text or not content_text.strip():
+            return jsonify({'error': 'Content text is required'}), 400
+        
+        rules = pptx_service.get_stored_rules()
+        layouts = rules.get('layouts', [])
+        
+        if not layouts:
+            return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
+        
+        structure = get_ai_service().preprocess_content_structure(
+            content_text=content_text,
+            layouts=layouts,
+            num_images=num_images
+        )
+        
+        return jsonify({
+            'success': True,
+            'structure': structure
+        })
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_blueprint.route('/preview-slides', methods=['POST'])
+def preview_slides():
+    """Generate slide specifications from structured content"""
+    try:
+        request_data = request.get_json()
+        
+        if not request_data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        structured_content = request_data.get('structured_content', None)
         images = request_data.get('images', [])
         
-        if not content_text and not images:
-            return jsonify({'error': 'Either content_text or images is required'}), 400
-        
-        if content_text and not isinstance(content_text, str):
-            return jsonify({'error': 'Content text must be a string'}), 400
+        if not structured_content:
+            return jsonify({'error': 'Structured content is required'}), 400
         
         if not isinstance(images, list):
             return jsonify({'error': 'Images must be an array'}), 400
@@ -101,21 +138,14 @@ def preview_slides():
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
         
-        num_images = len(images)
-        has_text_content = bool(content_text and content_text.strip())
+        # Validate structured content
+        if 'structure' not in structured_content:
+            return jsonify({'error': 'Invalid structured content format'}), 400
         
-        is_valid, error_message = validate_content_feasibility(layouts, num_images, has_text_content)
+        slides = structured_content['structure']
         
-        if not is_valid:
-            summary = get_feasibility_summary(layouts, num_images)
-            return jsonify({
-                'error': error_message,
-                'template_analysis': summary
-            }), 400
-        
-        image_filenames = []
-        image_data_list = []
-        
+        # Store images for later use
+        pptx_service.clear_images()
         for i, img in enumerate(images):
             if not isinstance(img, dict):
                 return jsonify({'error': f'Image {i} must be an object with filename and data'}), 400
@@ -126,19 +156,38 @@ def preview_slides():
             if not filename or not image_data:
                 return jsonify({'error': f'Image {i} missing filename or data'}), 400
             
-            image_filenames.append(filename)
-            image_data_list.append(image_data)
+            pptx_service.store_image(filename, image_data)
         
-        slide_specs = get_ai_service().organize_content_into_slides(
-            content_text=content_text,
-            image_filenames=image_filenames,
-            layouts=layouts,
-            image_data_list=image_data_list,
-            slides_specification=[]
-        )
+        # Validate each slide has complete placeholder information
+        for i, slide in enumerate(slides):
+            if 'layout_name' not in slide:
+                return jsonify({'error': f'Slide {i+1} missing layout_name'}), 400
+            
+            if 'placeholders' not in slide or not slide['placeholders']:
+                return jsonify({'error': f'Slide {i+1} missing placeholders'}), 400
+            
+            # Find matching layout
+            layout = next((l for l in layouts if l['name'] == slide['layout_name']), None)
+            if not layout:
+                return jsonify({'error': f'Slide {i+1}: Layout "{slide["layout_name"]}" not found'}), 400
+            
+            # Verify all placeholder indices are valid
+            layout_placeholder_indices = {ph['idx'] for ph in layout['placeholders']}
+            slide_placeholder_indices = {ph['idx'] for ph in slide['placeholders']}
+            
+            if slide_placeholder_indices != layout_placeholder_indices:
+                missing = layout_placeholder_indices - slide_placeholder_indices
+                extra = slide_placeholder_indices - layout_placeholder_indices
+                error_msg = f'Slide {i+1} placeholder mismatch.'
+                if missing:
+                    error_msg += f' Missing indices: {sorted(missing)}.'
+                if extra:
+                    error_msg += f' Extra indices: {sorted(extra)}.'
+                return jsonify({'error': error_msg}), 400
         
+        # Return slides directly from structured content (1:1 mapping)
         return jsonify({
-            'slides': slide_specs
+            'slides': slides
         })
     
     except ValueError as e:

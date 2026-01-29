@@ -96,8 +96,24 @@ export async function generateDeck(
   })
 }
 
-export async function generateSlidePreview(
+export async function preprocessContent(
   contentText: string,
+  numImages: number
+): Promise<{ success: boolean; structure: any }> {
+  return fetchApi('/api/preprocess-content', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content_text: contentText,
+      num_images: numImages,
+    }),
+  })
+}
+
+export async function generateSlidePreview(
+  structuredContent: any,
   images: Array<{ filename: string; data: string }>
 ): Promise<{ slides: any[] }> {
   return fetchApi('/api/preview-slides', {
@@ -106,7 +122,7 @@ export async function generateSlidePreview(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      content_text: contentText,
+      structured_content: structuredContent,
       images,
     }),
   })

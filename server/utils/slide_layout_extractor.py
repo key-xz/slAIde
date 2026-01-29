@@ -2,12 +2,17 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from utils.style_extractor import extract_placeholder_complete_styling
 
 
-def extract_shape_complete_properties(shape, placeholder_idx):
+def extract_shape_complete_properties(shape):
     
     shape_type = shape.shape_type
     
+    # Get the real placeholder index if it exists
+    real_idx = -1
+    if hasattr(shape, 'placeholder_format'):
+        real_idx = shape.placeholder_format.idx
+    
     base_props = {
-        'placeholder_idx': placeholder_idx,
+        'placeholder_idx': real_idx,
         'shape_type': str(shape_type),
         'name': shape.name,
         'position': {
@@ -166,21 +171,23 @@ def extract_slide_as_layout(slide, layout_index):
         'shapes': []
     }
     
-    placeholder_idx = 0
+    # We'll use a counter for our internal reference, but also store the real PPTX idx
+    internal_idx = 0
     
     for shape in slide.shapes:
         try:
-            shape_props = extract_shape_complete_properties(shape, placeholder_idx)
+            shape_props = extract_shape_complete_properties(shape)
             
             if shape_props.get('is_placeholder', False):
                 layout_def['placeholders'].append({
-                    'idx': placeholder_idx,
+                    'idx': internal_idx,
+                    'real_pptx_idx': shape_props['placeholder_idx'],
                     'type': shape_props['content_type'],
                     'name': shape.name,
                     'position': shape_props['position'],
                     'properties': shape_props
                 })
-                placeholder_idx += 1
+                internal_idx += 1
             else:
                 layout_def['shapes'].append(shape_props)
         

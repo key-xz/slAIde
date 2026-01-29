@@ -20,7 +20,7 @@ export function FileUploadSection({
 
   return (
     <div className="my-8">
-      <h2 className="text-lg font-semibold mb-4">1. Upload PowerPoint as Template</h2>
+      <h2 className="text-lg font-semibold mb-4">Template</h2>
       <input
         type="file"
         accept={APP_CONSTANTS.acceptedFileTypes.join(',')}
@@ -30,9 +30,9 @@ export function FileUploadSection({
       <button 
         onClick={onUpload} 
         disabled={!file || loading}
-        className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm font-medium"
       >
-        {loading ? 'Extracting...' : 'Extract Rules'}
+        {loading ? 'Processing...' : 'Upload Template'}
       </button>
     </div>
   )

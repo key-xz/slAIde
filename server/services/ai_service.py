@@ -11,6 +11,114 @@ class AIService:
         self.client = OpenAI(api_key=api_key)
         self.model = Config.AI_MODEL
     
+    def preprocess_content_structure(self, content_text, layouts, num_images=0):
+        """
+        Preprocess raw content into structured slide outlines following Minto Pyramid Principle.
+        AI analyzes both content and layouts to determine the best structure and layout mapping.
+        """
+        layout_descriptions = self._format_layouts_for_prompt(layouts)
+        
+        system_prompt = """You are a presentation architect and master storyteller specializing in the Minto Pyramid Principle. 
+
+Your task is to:
+1. Analyze the raw content to identify the core message and supporting arguments.
+2. Analyze the available slide layouts to understand the visual and structural possibilities.
+3. Architect a slide deck that maps the content to the most effective layouts based on the content's nature (expository, abstract, data-heavy, visual-heavy, etc.).
+
+THE MINTO PYRAMID PRINCIPLE:
+- Start with the answer/conclusion (Executive Summary/Key Message).
+- Support with grouped arguments at the same logical level.
+- Each group should have 3-5 supporting points.
+- Progress from general to specific.
+- Use SCQA framework: Situation, Complication, Question, Answer.
+
+LAYOUT MAPPING STRATEGY:
+- Match content density to layout capacity.
+- CRITICAL: Pay attention to the "Font Size" and "Capacity" of each text placeholder. 
+- VERY LOW capacity placeholders (huge font) MUST ONLY contain 3-5 words.
+- LOW capacity placeholders (large font) MUST ONLY contain a single short sentence or title.
+- HIGH capacity placeholders are the ONLY ones that can handle long lists or multiple paragraphs.
+- If you have a lot of text for a slide, you MUST choose a layout with HIGH capacity placeholders.
+- If you choose a layout with only LOW capacity placeholders, you MUST truncate or summarize the content to fit.
+- NEVER allow text to overflow its designated placeholder. It is better to create an additional slide than to overflow a layout.
+- Use multi-placeholder layouts for comparisons or complex groupings.
+- Use image-capable layouts where visual support (abstract or specific) enhances the message.
+- If content is expository, use layouts with clear title and body regions.
+- If content is abstract or visual, use image-focused or gallery-style layouts.
+
+CRITICAL CONSTRAINTS:
+1. You can ONLY use the exact 'layout_name' values provided in the "Available Layouts" list.
+2. For each slide, you MUST populate EVERY placeholder index (idx) defined in that layout.
+3. Match types exactly: TEXT placeholders get text, IMAGE placeholders get an image_index.
+4. If images are provided (indices 0 to N-1), you MUST use all of them exactly once across the deck.
+
+Return a JSON object with:
+{
+  "structure": [
+    {
+      "slide_number": 1,
+      "slide_type": "title|key_message|section_divider|content|conclusion",
+      "layout_name": "EXACT layout name from the list",
+      "placeholders": [
+        {
+          "idx": number,
+          "type": "text|image",
+          "content": "string (for text)",
+          "image_index": number (for image),
+          "capacity_label": "the capacity label provided in the layout description"
+        }
+      ],
+      "notes": "speaker notes",
+      "rationale": "why this layout was chosen for this specific content chunk"
+    }
+  ],
+  "deck_summary": {
+    "total_slides": number,
+    "pyramid_structure": "description of the logical flow",
+    "key_message": "the core takeaway"
+  }
+}"""
+
+        text_prompt = f"""Available Layouts:
+{layout_descriptions}
+
+Raw Content to Process:
+{content_text}
+
+Number of Images Available: {num_images}
+{f"Image indices to use: 0 to {num_images-1}" if num_images > 0 else ""}
+
+Determine the best way to chop this information into slides using the available layouts. Return ONLY valid JSON."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            raw_content = response.choices[0].message.content
+            print("\n" + "="*80)
+            print("CONTENT STRUCTURE PREPROCESSING:")
+            print("="*80)
+            print(raw_content)
+            print("="*80 + "\n")
+            
+            result = json.loads(raw_content)
+            
+            if 'structure' not in result:
+                raise ValueError("AI response missing 'structure' field")
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse AI response as JSON: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"AI preprocessing error: {str(e)}")
+    
     def organize_content_into_slides(self, content_text, image_filenames, layouts, image_data_list=None, slides_specification=None):
         layout_descriptions = self._format_layouts_for_prompt(layouts)
         has_images = image_data_list and len(image_data_list) > 0
@@ -304,10 +412,37 @@ Generate a complete slide deck. Return ONLY valid JSON (no markdown, no explanat
                 ph_type = ph['type']
                 ph_idx = ph['idx']
                 ph_name = ph['name']
+                pos = ph.get('position', {})
+                width = pos.get('width', 0)
+                height = pos.get('height', 0)
+                area = width * height
                 
+                # Extract font size if available
+                font_size = 18  # Default assumption
+                props = ph.get('properties', {})
+                if 'font_props' in props and 'size' in props['font_props']:
+                    font_size = props['font_props']['size']
+                
+                # Heuristic for capacity based on area and font size
+                # A character roughly takes (font_size * 0.5) width and (font_size * 1.2) height
+                # Area per character ~ font_size^2 * 0.6
+                char_area = (font_size ** 2) * 0.6
+                estimated_chars = area / char_area if char_area > 0 else 0
+                
+                if font_size > 40:
+                    capacity_label = "VERY LOW (Huge font, max 3-5 words)"
+                elif font_size > 28:
+                    capacity_label = "LOW (Large font, max 1 short sentence)"
+                elif estimated_chars < 100:
+                    capacity_label = "MEDIUM-LOW (Small area, max 2 sentences)"
+                elif estimated_chars < 500:
+                    capacity_label = "MEDIUM (Standard capacity)"
+                else:
+                    capacity_label = "HIGH (Large capacity, suitable for long lists or paragraphs)"
+
                 if ph_type == 'text':
                     text_count += 1
-                    desc += f"\n  ▸ idx={ph_idx}: TEXT | name=\"{ph_name}\""
+                    desc += f"\n  ▸ idx={ph_idx}: TEXT | name=\"{ph_name}\" | Font Size: {font_size}pt | Capacity: {capacity_label}"
                 elif ph_type == 'image':
                     has_image = True
                     desc += f"\n  ▸ idx={ph_idx}: IMAGE | name=\"{ph_name}\""
@@ -339,7 +474,7 @@ Generate a complete slide deck. Return ONLY valid JSON (no markdown, no explanat
         desc_text = '\n'.join(descriptions)
         desc_text += f"\n\n{'='*60}"
         desc_text += f"\nTOTAL: {len(layouts)} layouts available"
-        desc_text += f"\nREMINDER: USE DIFFERENT LAYOUTS for variety! Don't repeat the same layout."
+        desc_text += f"\nREMINDER: Match content density to placeholder capacity! Don't put long text in LOW capacity placeholders."
         desc_text += f"\n{'='*60}"
         
         return desc_text
