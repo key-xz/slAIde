@@ -1,5 +1,6 @@
 import { downloadBase64File } from '../utils/placeholderHelpers'
 import type { SlideSpec } from '../types'
+import { LoadingIndicator } from './LoadingIndicator'
 
 interface DownloadSectionProps {
   generatedFile: string | null
@@ -25,6 +26,15 @@ export function DownloadSection({
       generatedFile,
       'generated-slide.pptx',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    )
+  }
+
+  if (generating) {
+    return (
+      <LoadingIndicator 
+        stage="compressing" 
+        detail="AI is intelligently compressing content to fit within slide boundaries"
+      />
     )
   }
 
@@ -59,15 +69,13 @@ export function DownloadSection({
         <div className="flex flex-col sm:flex-row gap-3">
           <button
             onClick={onGenerateWithCompression}
-            disabled={generating}
-            className="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition-colors"
           >
-            {generating ? 'compressing...' : 'apply AI compression'}
+            apply AI compression
           </button>
           <button
             onClick={onGenerateWithOverflow}
-            disabled={generating}
-            className="flex-1 px-6 py-3 bg-gray-600 text-white font-medium rounded hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 px-6 py-3 bg-gray-600 text-white font-medium rounded hover:bg-gray-700 transition-colors"
           >
             download as-is
           </button>

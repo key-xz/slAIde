@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { TaggedImage, ContentWithLinks, TextChunk } from '../types'
 import { ContentLinkingEditor } from './ContentLinkingEditor'
+import { LoadingIndicator } from './LoadingIndicator'
 import * as api from '../services/api'
 
 interface BulkContentUploadProps {
@@ -8,6 +9,8 @@ interface BulkContentUploadProps {
   preprocessing: boolean
   layouts: any[]
   slideSize?: { width: number; height: number }
+  aiModel?: string
+  onCancelRequest?: () => void
 }
 
 const PREDEFINED_TAGS = [
@@ -22,12 +25,14 @@ const PREDEFINED_TAGS = [
   'brand',
 ]
 
-export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideSize }: BulkContentUploadProps) {
+export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideSize, aiModel, onCancelRequest }: BulkContentUploadProps) {
   const [images, setImages] = useState<TaggedImage[]>([])
   const [rawText, setRawText] = useState('')
   const [chunks, setChunks] = useState<TextChunk[]>([])
   const [useAiChunking, setUseAiChunking] = useState(true)
   const [aiChunking, setAiChunking] = useState(false)
+  
+  const isProcessing = preprocessing || aiChunking
 
   const generateUniqueId = () => `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
@@ -85,7 +90,8 @@ export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideS
     setAiChunking(true)
 
     try {
-      const result = await api.intelligentChunk(rawText, images, layouts, slideSize)
+      const controller = new AbortController()
+      const result = await api.intelligentChunk(rawText, images, layouts, slideSize, aiModel || 'fast', controller.signal)
       
       // ai has already created the slide structure, pass it with deck_summary
       onPreprocess({
@@ -97,7 +103,13 @@ export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideS
         }
       })
     } catch (err) {
-      alert(`ai chunking failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+      if (err instanceof Error && err.name === 'AbortError') {
+        alert('request cancelled')
+      } else {
+        const errorMessage = err instanceof Error ? err.message : 'unknown error'
+        alert(`ai chunking failed: ${errorMessage}`)
+        console.error('AI chunking error:', err)
+      }
     } finally {
       setAiChunking(false)
     }
@@ -473,10 +485,10 @@ export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideS
             
             <button
               onClick={handlePreprocess}
-              disabled={preprocessing || aiChunking || !rawText.trim()}
+              disabled={isProcessing || !rawText.trim()}
               className="px-8 py-3 bg-blue-600 text-white rounded-md cursor-pointer font-semibold transition-all hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              {(preprocessing || aiChunking) ? 'processing...' : 'generate slide structure'}
+              generate slide structure
             </button>
             
             {!useAiChunking && (

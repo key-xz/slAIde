@@ -1,3 +1,5 @@
+import { LoadingIndicator } from './LoadingIndicator'
+
 interface SlideStructure {
   slide_number: number
   slide_type: string
@@ -49,6 +51,15 @@ export function ContentStructurePreview({
       default:
         return 'bg-gray-50 border-gray-200 text-gray-700'
     }
+  }
+
+  if (loading) {
+    return (
+      <LoadingIndicator 
+        stage="generating" 
+        detail="Creating slide previews with your approved structure"
+      />
+    )
   }
 
   return (
@@ -131,17 +142,15 @@ export function ContentStructurePreview({
       <div className="flex gap-3 justify-end">
         <button
           onClick={() => onEdit(structure)}
-          disabled={loading}
           className="px-4 py-2 text-gray-500 text-sm font-medium hover:text-gray-800"
         >
           edit
         </button>
         <button
           onClick={onApprove}
-          disabled={loading}
-          className="px-6 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm"
+          className="px-6 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 transition-colors text-sm"
         >
-          {loading ? 'generating...' : 'generate slides'}
+          generate slides
         </button>
       </div>
     </div>

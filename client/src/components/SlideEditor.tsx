@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { SlideSpec, StylingRules, ThemeSettings } from '../types'
 import { SlideCard } from './SlideCard'
 import { ThemeCustomizer } from './ThemeCustomizer'
+import { LoadingIndicator } from './LoadingIndicator'
 
 interface SlideEditorProps {
   slides: SlideSpec[]
@@ -81,24 +82,31 @@ export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGe
 
   return (
     <div className="my-8 p-6 bg-white rounded-lg border border-gray-200">
-      <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
-        <h3 className="m-0 text-lg font-semibold text-gray-900">slides ({slides.length})</h3>
-        <button
-          onClick={() => onGenerate(slides)}
-          disabled={generating || slides.length === 0}
-          className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer font-medium transition-all hover:bg-green-700 disabled:bg-gray-300 text-sm"
-        >
-          {generating ? 'generating...' : 'download pptx'}
-        </button>
-      </div>
+      {generating ? (
+        <LoadingIndicator 
+          stage="generating" 
+          detail="Building your PowerPoint presentation with all slides and content"
+        />
+      ) : (
+        <>
+          <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
+            <h3 className="m-0 text-lg font-semibold text-gray-900">slides ({slides.length})</h3>
+            <button
+              onClick={() => onGenerate(slides)}
+              disabled={slides.length === 0}
+              className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer font-medium transition-all hover:bg-green-700 disabled:bg-gray-300 text-sm"
+            >
+              download pptx
+            </button>
+          </div>
 
-      {/* Theme Customization Section */}
-      <ThemeCustomizer
-        currentTheme={getCurrentTheme()}
-        onThemeUpdate={handleThemeUpdate}
-      />
+          {/* Theme Customization Section */}
+          <ThemeCustomizer
+            currentTheme={getCurrentTheme()}
+            onThemeUpdate={handleThemeUpdate}
+          />
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mt-6">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mt-6">
         {slides.map((slide, index) => {
           const layout = rules.layouts.find(l => l.name === slide.layout_name)
           return (
@@ -125,7 +133,9 @@ export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGe
             </div>
           )
         })}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

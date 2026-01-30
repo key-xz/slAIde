@@ -354,6 +354,10 @@ def preview_slides():
                 return jsonify({'error': error_msg}), 400
         
         # Return slides directly from structured content (1:1 mapping)
+        print(f"\nPREVIEW-SLIDES returning {len(slides)} slides:")
+        for i, slide in enumerate(slides):
+            print(f"   slide {i+1}: layout='{slide.get('layout_name')}' with {len(slide.get('placeholders', []))} placeholders")
+        
         return jsonify({
             'slides': slides
         })
@@ -437,6 +441,13 @@ def generate_deck():
                 pptx_service.store_image(filename, image_data)
             
             slide_specs = slides_spec
+            
+            print(f"\nGENERATE-DECK received {len(slide_specs)} slides:")
+            for i, spec in enumerate(slide_specs):
+                layout = spec.get('layout_name', 'NO_LAYOUT')
+                num_phs = len(spec.get('placeholders', []))
+                num_images = len([ph for ph in spec.get('placeholders', []) if ph.get('type') == 'image'])
+                print(f"   slide {i+1}: layout='{layout}' ({num_phs} placeholders, {num_images} images)")
         else:
             num_images = len(images)
             has_text_content = bool(content_text and content_text.strip())

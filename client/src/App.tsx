@@ -17,6 +17,7 @@ type Tab = 'assets' | 'collection' | 'generate'
 function App() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('assets')
+  const [collectionKey, setCollectionKey] = useState(0)
   
   const {
     file,
@@ -81,7 +82,10 @@ function App() {
                   ? 'text-blue-600 border-blue-600'
                   : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-black/5'
               }`}
-              onClick={() => setActiveTab('collection')}
+              onClick={() => {
+                setActiveTab('collection')
+                setCollectionKey(prev => prev + 1) // force refresh when opening tab
+              }}
             >
               layout collection
             </button>
@@ -130,6 +134,7 @@ function App() {
           <div className="max-w-7xl mx-auto">
             {user ? (
               <LayoutCollectionView
+                key={collectionKey}
                 onDeleteLayout={handleDeleteLayoutFromCollection}
                 onRefresh={loadTemplates}
               />
@@ -189,14 +194,15 @@ function App() {
                     <div className="text-xs font-semibold text-gray-600">AI model:</div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setAiModel('kimi')}
+                        onClick={() => setAiModel('fast')}
                         className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-                          aiModel === 'kimi'
-                            ? 'bg-blue-600 text-white'
+                          aiModel === 'fast'
+                            ? 'bg-green-600 text-white'
                             : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                         }`}
+                        title="gemini flash - fastest for testing"
                       >
-                        kimi k2.5
+                        fast test
                       </button>
                       <button
                         onClick={() => setAiModel('openai')}
@@ -206,7 +212,17 @@ function App() {
                             : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                         }`}
                       >
-                        openai gpt-4o-mini
+                        openai
+                      </button>
+                      <button
+                        onClick={() => setAiModel('kimi')}
+                        className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                          aiModel === 'kimi'
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        kimi
                       </button>
                     </div>
                   </div>
@@ -236,6 +252,8 @@ function App() {
                     preprocessing={preprocessing}
                     layouts={rules?.layouts || []}
                     slideSize={rules?.slide_size}
+                    aiModel={aiModel}
+                    onCancelRequest={handleCancelGeneration}
                   />
                 )}
 

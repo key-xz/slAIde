@@ -177,7 +177,9 @@ export async function intelligentChunk(
   rawText: string,
   images: TaggedImage[],
   layouts: any[],
-  slideSize?: { width: number; height: number }
+  slideSize?: { width: number; height: number },
+  aiModel?: string,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; structure: any; deck_summary: any }> {
   return fetchApi('/api/intelligent-chunk', {
     method: 'POST',
@@ -196,8 +198,9 @@ export async function intelligentChunk(
       })),
       layouts,
       slide_size: slideSize,
+      ai_model: aiModel || 'fast',
     }),
-  })
+  }, signal)
 }
 
 export async function preprocessContentWithLinks(

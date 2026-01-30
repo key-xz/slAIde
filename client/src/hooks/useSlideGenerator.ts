@@ -21,7 +21,7 @@ export function useSlideGenerator() {
   const [imageStore, setImageStore] = useState<TaggedImage[]>([])
   const [regeneratingSlideId, setRegeneratingSlideId] = useState<string | null>(null)
   const [overflowInfo, setOverflowInfo] = useState<{ count: number; details: any[] } | null>(null)
-  const [aiModel, setAiModel] = useState<'openai' | 'kimi'>('kimi')
+  const [aiModel, setAiModel] = useState<'openai' | 'kimi' | 'fast'>('fast')
   const [abortController, setAbortController] = useState<AbortController | null>(null)
 
   // load user's templates when authenticated
@@ -305,6 +305,18 @@ export function useSlideGenerator() {
           ...(ph.type === 'text' ? { content: ph.content } : { image_index: ph.image_index }),
         })),
       }))
+      
+      console.log('=== SENDING TO GENERATE-DECK ===')
+      console.log('Total slides:', slidesForAPI.length)
+      slidesForAPI.forEach((slide, i) => {
+        const imgCount = slide.placeholders.filter(ph => ph.type === 'image').length
+        console.log(`Slide ${i+1}: layout='${slide.layout_name}' (${slide.placeholders.length} placeholders, ${imgCount} images)`)
+      })
+      console.log('=== IMAGE STORE ===')
+      console.log('Total images:', imageStore.length)
+      imageStore.forEach((img, i) => {
+        console.log(`Image ${i}: ${img.filename}`)
+      })
 
       const data = await api.generateDeckFromSlides(
         slidesForAPI, 

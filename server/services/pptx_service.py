@@ -757,6 +757,14 @@ class PPTXService:
             
             # Get the source slide index (0-based) from the layout
             source_slide_index = layout_template.get('layout_index', layout_template.get('layout_idx', layout_template.get('slide_number', 1) - 1))
+            
+            # CRITICAL DEBUG: Check if layout_index is actually set
+            if source_slide_index == 0 and i > 0:
+                print(f"  WARNING: Layout '{layout_name}' has source_slide_index=0 (might be incorrect!)")
+                print(f"           layout_template keys: {list(layout_template.keys())}")
+                print(f"           layout_index value: {layout_template.get('layout_index')}")
+                print(f"           layout_idx value: {layout_template.get('layout_idx')}")
+            
             print(f"  -> will clone from source slide index {source_slide_index}")
             
             try:

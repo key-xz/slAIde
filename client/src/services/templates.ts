@@ -136,17 +136,22 @@ export async function saveTemplate(
   }
 
   // insert new layouts (sanitize to plain json)
-  const layoutsToInsert = stylingRules.layouts.map((layout, index) => ({
-    template_id: template.id,
-    name: toStringSafe(layout?.name),
-    master_name: toStringSafe((layout as any)?.master_name),
-    layout_idx: toNumber((layout as any)?.layout_index ?? (layout as any)?.layout_idx ?? index),
-    placeholders: sanitizePlaceholders((layout as any)?.placeholders),
-    shapes: sanitizeShapes((layout as any)?.shapes),
-    category: toStringSafe((layout as any)?.category) || null,
-    category_confidence: typeof (layout as any)?.categoryConfidence === 'number' ? (layout as any).categoryConfidence : null,
-    category_rationale: toStringSafe((layout as any)?.categoryRationale) || null,
-  }))
+  const layoutsToInsert = stylingRules.layouts.map((layout, index) => {
+    const layoutIndex = toNumber((layout as any)?.layout_index ?? (layout as any)?.layout_idx ?? index)
+    console.log(`Saving layout ${index}: "${toStringSafe(layout?.name)}" with layout_idx=${layoutIndex}`)
+    
+    return {
+      template_id: template.id,
+      name: toStringSafe(layout?.name),
+      master_name: toStringSafe((layout as any)?.master_name),
+      layout_idx: layoutIndex,
+      placeholders: sanitizePlaceholders((layout as any)?.placeholders),
+      shapes: sanitizeShapes((layout as any)?.shapes),
+      category: toStringSafe((layout as any)?.category) || null,
+      category_confidence: typeof (layout as any)?.categoryConfidence === 'number' ? (layout as any).categoryConfidence : null,
+      category_rationale: toStringSafe((layout as any)?.categoryRationale) || null,
+    }
+  })
 
   const { data: layouts, error: layoutsError } = await supabase
     .from('layouts')

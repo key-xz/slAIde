@@ -35,7 +35,7 @@ class AIService:
         self.client = self.openrouter_client
 
     def set_model(self, model_name: str):
-        """switch between openai and kimi models"""
+        """switch between openai, kimi, and fast test models"""
         if model_name == 'openai':
             if not self.openai_client:
                 raise ValueError('OpenAI API key not configured')
@@ -43,6 +43,12 @@ class AIService:
             self.model = 'gpt-4o-mini'
             self.current_provider = 'openai'
             print(f"switched to OpenAI (gpt-4o-mini)")
+        elif model_name == 'fast':
+            # use gemini 2.0 flash for extremely fast testing
+            self.client = self.openrouter_client
+            self.model = 'google/gemini-2.0-flash-001'
+            self.current_provider = 'openrouter'
+            print(f"switched to Fast Test Mode (gemini-2.0-flash-001)")
         else:  # kimi or default
             self.client = self.openrouter_client
             self.model = 'moonshotai/kimi-k2.5'
@@ -606,11 +612,14 @@ Each chunk should already know which layout to use and which images to pair with
             result['deck_summary'] = deck_summary
             
             print(f"\nAI INTELLIGENT CHUNKING complete: {len(slides)} slides")
+            print("="*80)
+            print("SLIDES RETURNED BY AI:")
             for i, slide in enumerate(slides):
                 layout = slide.get('layout_name', 'unknown')
                 num_text = len([ph for ph in slide.get('placeholders', []) if ph.get('type') == 'text'])
                 num_img = len([ph for ph in slide.get('placeholders', []) if ph.get('type') == 'image'])
-                print(f"   slide {i+1}: {layout} ({num_text}T + {num_img}I)")
+                print(f"   slide {i+1}: layout='{layout}' ({num_text}T + {num_img}I)")
+            print("="*80)
             
             # validate aesthetic choices and collect warnings
             warnings = self._validate_aesthetic_choices(slides, layouts, slide_size)

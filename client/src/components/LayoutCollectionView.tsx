@@ -17,18 +17,29 @@ export function LayoutCollectionView({ onDeleteLayout, onRefresh }: LayoutCollec
   const [groupBy, setGroupBy] = useState<GroupBy>('template')
   const [sortBy, setSortBy] = useState<SortBy>('newest')
   const [searchQuery, setSearchQuery] = useState('')
+  const [lastFetch, setLastFetch] = useState<number>(0)
 
   useEffect(() => {
+    // always fetch fresh data when component mounts or remounts
     loadLayouts()
   }, [])
 
-  const loadLayouts = async () => {
+  const loadLayouts = async (forceRefresh = false) => {
+    // cache for 30 seconds unless force refresh
+    const now = Date.now()
+    if (!forceRefresh && lastFetch && (now - lastFetch) < 30000) {
+      console.log('using cached layouts (fetched', Math.floor((now - lastFetch) / 1000), 'seconds ago)')
+      return
+    }
+    
     setLoading(true)
     setError(null)
     
     try {
+      console.log('fetching latest layouts from database...')
       const allLayouts = await templateApi.getAllUserLayouts()
       setLayouts(allLayouts)
+      setLastFetch(Date.now())
       onRefresh?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to load layouts')
