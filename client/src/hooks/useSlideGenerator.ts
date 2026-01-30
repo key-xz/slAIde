@@ -50,6 +50,9 @@ export function useSlideGenerator() {
   const loadTemplate = async (templateId: string) => {
     setLoading(true)
     setError(null)
+    setGeneratedFile(null)
+    setSlides([])
+    setContentStructure(null)
     
     try {
       const stylingRules = await templateApi.getTemplate(templateId)
@@ -104,10 +107,18 @@ export function useSlideGenerator() {
       
       // auto-save if user is authenticated
       if (user) {
-        const name = templateName || file.name.replace('.pptx', '')
-        const { template } = await templateApi.saveTemplate(name, data)
-        setCurrentTemplateId(template.id)
-        await loadTemplates()
+        try {
+          const safeTemplateName = typeof templateName === 'string' ? templateName : undefined
+          const name = safeTemplateName || file.name.replace('.pptx', '')
+          const { template } = await templateApi.saveTemplate(name, data)
+          setCurrentTemplateId(template.id)
+          await loadTemplates()
+        } catch (saveErr) {
+          console.error('failed to save template to database:', saveErr)
+          // don't fail the whole upload if db save fails
+          // rules are already set, so user can still use them
+          setError(`template extracted but not saved: ${saveErr instanceof Error ? saveErr.message : 'unknown error'}`)
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'an error occurred')
@@ -293,6 +304,25 @@ export function useSlideGenerator() {
     }
   }
 
+  const handleDeleteLayoutFromCollection = async (templateId: string, layoutName: string) => {
+    try {
+      await templateApi.deleteLayout(templateId, layoutName)
+      
+      // if deleting from current template, update local state
+      if (templateId === currentTemplateId && rules) {
+        setRules({
+          ...rules,
+          layouts: rules.layouts.filter((l) => l.name !== layoutName),
+        })
+      }
+      
+      await loadTemplates()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to delete layout')
+      throw err // re-throw so collection view can handle it
+    }
+  }
+
   const handleRegenerateSlide = async (slideId: string) => {
     setRegeneratingSlideId(slideId)
     setError(null)
@@ -370,6 +400,7 @@ export function useSlideGenerator() {
     handleGeneratePreview,
     handleGenerateDeck,
     handleDeleteLayout,
+    handleDeleteLayoutFromCollection,
     handleDeleteTemplate,
     handleRegenerateSlide,
     loadTemplate,

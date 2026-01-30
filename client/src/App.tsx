@@ -7,11 +7,12 @@ import { SlideEditor } from './components/SlideEditor'
 import { DownloadSection } from './components/DownloadSection'
 import { LayoutManager } from './components/LayoutManager'
 import { TemplateSelector } from './components/TemplateSelector'
+import { LayoutCollectionView } from './components/LayoutCollectionView'
 import { ErrorDisplay } from './components/ErrorDisplay'
 import { UserMenu } from './components/UserMenu'
 import { useAuth } from './contexts/AuthContext'
 
-type Tab = 'assets' | 'generate'
+type Tab = 'assets' | 'collection' | 'generate'
 
 function App() {
   const { user } = useAuth()
@@ -37,13 +38,19 @@ function App() {
     handleGenerateFromStructure,
     handleGenerateDeck,
     handleDeleteLayout,
+    handleDeleteLayoutFromCollection,
     handleDeleteTemplate,
     handleRegenerateSlide,
     loadTemplate,
+    loadTemplates,
     setSlides,
     setRules,
     setContentStructure,
   } = useSlideGenerator()
+
+  const currentTemplate = currentTemplateId
+    ? templates.find((t) => t.id === currentTemplateId) || null
+    : null
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -63,6 +70,18 @@ function App() {
           >
             template upload
           </button>
+          {user && (
+            <button
+              className={`px-6 py-3 font-medium text-sm transition-all border-b-2 ${
+                activeTab === 'collection'
+                  ? 'text-blue-600 border-blue-600'
+                  : 'text-gray-500 border-transparent hover:text-gray-700 hover:bg-black/5'
+              }`}
+              onClick={() => setActiveTab('collection')}
+            >
+              layout collection
+            </button>
+          )}
           <button
             className={`px-6 py-3 font-medium text-sm transition-all border-b-2 ${
               activeTab === 'generate'
@@ -103,11 +122,67 @@ function App() {
           </div>
         )}
 
+        {activeTab === 'collection' && (
+          <div className="max-w-7xl mx-auto">
+            {user ? (
+              <LayoutCollectionView
+                onDeleteLayout={handleDeleteLayoutFromCollection}
+                onRefresh={loadTemplates}
+              />
+            ) : (
+              <div className="p-8 bg-blue-50 border border-blue-200 rounded-lg text-center">
+                <p className="text-gray-700">please log in to view your layout collection</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'generate' && (
           <div className="max-w-6xl mx-auto">
+            {user && templates.length > 0 && (
+              <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex-1 min-w-[220px]">
+                    <div className="text-xs font-semibold text-gray-600 mb-1">template group</div>
+                    <select
+                      value={currentTemplateId || ''}
+                      onChange={(e) => {
+                        const nextId = e.target.value
+                        if (nextId) loadTemplate(nextId)
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="" disabled>
+                        select a template…
+                      </option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    {currentTemplate && (
+                      <div className="mt-1 text-[11px] text-gray-500">
+                        using: {currentTemplate.name} · {currentTemplate.slide_size?.width}x{currentTemplate.slide_size?.height}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setActiveTab('assets')}
+                    className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 underline"
+                  >
+                    upload more templates
+                  </button>
+                </div>
+              </div>
+            )}
+
             {!rules ? (
               <p className="p-4 bg-blue-50 border border-blue-200 rounded text-blue-800 my-4">
-                please upload a template first.
+                {user && templates.length > 0
+                  ? 'please select a template group above.'
+                  : 'please upload a template first.'}
               </p>
             ) : (
               <>

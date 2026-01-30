@@ -4,6 +4,55 @@ import type { StylingRules, Template, LayoutRow } from '../types'
 // re-export types for convenience
 export type { Template, LayoutRow }
 
+function toNumber(value: any): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function toStringSafe(value: any): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  try {
+    return String(value)
+  } catch {
+    return ''
+  }
+}
+
+function sanitizeSlideSize(slideSize: any): { width: number; height: number } {
+  return {
+    width: toNumber(slideSize?.width),
+    height: toNumber(slideSize?.height),
+  }
+}
+
+function sanitizePosition(pos: any) {
+  return {
+    left: toNumber(pos?.left),
+    top: toNumber(pos?.top),
+    width: toNumber(pos?.width),
+    height: toNumber(pos?.height),
+  }
+}
+
+function sanitizePlaceholders(placeholders: any): any[] {
+  if (!Array.isArray(placeholders)) return []
+  return placeholders.map((ph) => ({
+    idx: toNumber(ph?.idx),
+    type: toStringSafe(ph?.type),
+    name: toStringSafe(ph?.name),
+    position: sanitizePosition(ph?.position),
+  }))
+}
+
+function sanitizeShapes(shapes: any): any[] | null {
+  if (!Array.isArray(shapes)) return null
+  // keep only geometry needed for preview; drop everything else
+  return shapes.map((s) => ({
+    position: sanitizePosition(s?.position),
+  }))
+}
+
 // save a complete template with all its layouts
 export async function saveTemplate(
   name: string,
@@ -16,23 +65,29 @@ export async function saveTemplate(
     throw new Error('user must be authenticated to save templates')
   }
 
+  // important: only store plain json fields (avoids cyclic refs from extraction output)
+  const slideSize = sanitizeSlideSize(stylingRules.slide_size)
+
+  const templatePayload = {
+    user_id: user.id,
+    name,
+    description,
+    slide_size: slideSize,
+    theme_data: null,
+    custom_theme: null,
+  }
+
   // insert or update template
   const { data: template, error: templateError } = await supabase
     .from('templates')
-    .upsert({
-      user_id: user.id,
-      name,
-      description,
-      slide_size: stylingRules.slide_size,
-      theme_data: stylingRules.theme_data,
-      custom_theme: stylingRules.customTheme,
-    }, {
+    .upsert(templatePayload, {
       onConflict: 'user_id,name',
     })
     .select()
     .single()
 
   if (templateError) {
+    console.error('supabase error saving template:', templateError)
     throw new Error(`failed to save template: ${templateError.message}`)
   }
 
@@ -46,17 +101,17 @@ export async function saveTemplate(
     throw new Error(`failed to delete old layouts: ${deleteError.message}`)
   }
 
-  // insert new layouts
-  const layoutsToInsert = stylingRules.layouts.map(layout => ({
+  // insert new layouts (sanitize to plain json)
+  const layoutsToInsert = stylingRules.layouts.map((layout) => ({
     template_id: template.id,
-    name: layout.name,
-    master_name: layout.master_name,
-    layout_idx: layout.layout_idx,
-    placeholders: layout.placeholders,
-    shapes: layout.shapes,
-    category: layout.category,
-    category_confidence: layout.categoryConfidence,
-    category_rationale: layout.categoryRationale,
+    name: toStringSafe(layout?.name),
+    master_name: toStringSafe((layout as any)?.master_name),
+    layout_idx: toNumber((layout as any)?.layout_idx),
+    placeholders: sanitizePlaceholders((layout as any)?.placeholders),
+    shapes: sanitizeShapes((layout as any)?.shapes),
+    category: toStringSafe((layout as any)?.category) || null,
+    category_confidence: typeof (layout as any)?.categoryConfidence === 'number' ? (layout as any).categoryConfidence : null,
+    category_rationale: toStringSafe((layout as any)?.categoryRationale) || null,
   }))
 
   const { data: layouts, error: layoutsError } = await supabase
@@ -65,6 +120,7 @@ export async function saveTemplate(
     .select()
 
   if (layoutsError) {
+    console.error('supabase error saving layouts:', layoutsError)
     throw new Error(`failed to save layouts: ${layoutsError.message}`)
   }
 
@@ -181,4 +237,28 @@ export async function deleteLayout(
   if (error) {
     throw new Error(`failed to delete layout: ${error.message}`)
   }
+}
+
+// get all layouts across all user templates with template info
+export async function getAllUserLayouts(): Promise<Array<LayoutRow & { template: Template }>> {
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  if (!user) {
+    return []
+  }
+
+  const { data, error } = await supabase
+    .from('layouts')
+    .select(`
+      *,
+      template:templates(*)
+    `)
+    .eq('templates.user_id', user.id)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`failed to fetch all layouts: ${error.message}`)
+  }
+
+  return (data || []) as Array<LayoutRow & { template: Template }>
 }

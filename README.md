@@ -11,12 +11,13 @@ slAIde transforms unorganized content into professional PowerPoint presentations
 ## Features
 - **Template Management**: Upload PowerPoint templates to extract layouts, styling rules, and placeholders
 - **Template Persistence**: Save templates to database for access across sessions and devices (requires authentication)
+- **Layout Collection Browser**: View, search, and manage all layouts across all templates in one organized view
 - **AI Content Organization**: Submit unorganized content and images; AI structures it into slides
 - **Smart Layout Selection**: AI automatically chooses appropriate layouts for each slide
 - **Content-Image Pairing**: AI intelligently pairs images with relevant text content
 - **Deterministic Rendering**: All slides generated via python-pptx for consistent, template-adherent output
 - **User Authentication**: Secure login via Supabase with email/password or magic links
-- **Tab-based Interface**: Separate workflows for asset upload, deck generation, and editing
+- **Tab-based Interface**: Separate workflows for asset upload, layout collection, and deck generation
 - Environment-based configuration
 - Modular, maintainable codebase
 - Production-ready architecture
