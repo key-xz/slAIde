@@ -1,6 +1,7 @@
 flask==3.1.0
 flask-cors==5.0.0
-python-pptx==1.0.0
+python-pptx==1.0.2
 werkzeug==3.1.3
 python-dotenv==1.0.0
 openai==1.58.1
+pptx2png==2025.1

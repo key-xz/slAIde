@@ -12,6 +12,7 @@ interface SlideCardProps {
   onRegenerate?: (slideId: string) => void
   isDragging?: boolean
   regenerating?: boolean
+  previewImage?: string
 }
 
 export function SlideCard({
@@ -24,6 +25,7 @@ export function SlideCard({
   onRegenerate,
   isDragging,
   regenerating,
+  previewImage,
 }: SlideCardProps) {
   const [isEditing, setIsEditing] = useState<number | null>(null)
   const [showRegenerateModal, setShowRegenerateModal] = useState(false)
@@ -169,71 +171,84 @@ export function SlideCard({
         </div>
 
       <div className="p-4">
-        <div className="relative w-full bg-white border border-gray-100 rounded overflow-hidden" style={{ paddingBottom: `${aspectRatio * 100}%` }}>
-          <div className="absolute top-0 left-0 w-full h-full">
-            {slide.placeholders.map(placeholder => {
-              const layoutPlaceholder = layout.placeholders.find(p => p.idx === placeholder.idx)
-              if (!layoutPlaceholder) return null
-
-              const style = getPlaceholderStyle(layoutPlaceholder)
-
-              if (placeholder.type === 'text') {
-                const isCurrentlyEditing = isEditing === placeholder.idx
-
-                return (
-                  <div
-                    key={placeholder.idx}
-                    className="border border-dashed border-gray-200 flex items-center justify-center overflow-hidden cursor-text p-1 hover:border-blue-400 hover:bg-blue-50/30"
-                    style={style}
-                    onClick={() => !isCurrentlyEditing && setIsEditing(placeholder.idx)}
-                  >
-                    {isCurrentlyEditing ? (
-                      <textarea
-                        className="w-full h-full border-none outline-none resize-none text-[10px] leading-tight p-0 bg-blue-50"
-                        value={placeholder.content || ''}
-                        onChange={(e) => {
-                          const updatedPlaceholders = slide.placeholders.map(ph =>
-                            ph.idx === placeholder.idx ? { ...ph, content: e.target.value } : ph
-                          )
-                          onUpdate(slide.id, { ...slide, placeholders: updatedPlaceholders })
-                        }}
-                        onBlur={(e) => handleContentUpdate(placeholder.idx, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') {
-                            setIsEditing(null)
-                          }
-                        }}
-                        autoFocus
-                      />
-                    ) : (
-                      <div className="w-full h-full overflow-auto text-[10px] leading-tight text-gray-800 whitespace-pre-wrap break-words">
-                        {placeholder.content || '...'}
-                      </div>
-                    )}
-                  </div>
-                )
-              }
-
-              if (placeholder.type === 'image') {
-                return (
-                  <div
-                    key={placeholder.idx}
-                    className="border border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50/50"
-                    style={style}
-                  >
-                    {placeholder.imageData ? (
-                      <img src={placeholder.imageData} alt="" className="w-full h-full object-contain" />
-                    ) : (
-                      <div className="text-gray-300 text-[8px]">img</div>
-                    )}
-                  </div>
-                )
-              }
-
-              return null
-            })}
+        {previewImage ? (
+          <div className="relative w-full rounded overflow-hidden border border-gray-200">
+            <img 
+              src={previewImage} 
+              alt={`Slide ${slideNumber} preview`}
+              className="w-full h-auto"
+            />
+            <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded">
+              rendered preview
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="relative w-full bg-white border border-gray-100 rounded overflow-hidden" style={{ paddingBottom: `${aspectRatio * 100}%` }}>
+            <div className="absolute top-0 left-0 w-full h-full">
+              {slide.placeholders.map(placeholder => {
+                const layoutPlaceholder = layout.placeholders.find(p => p.idx === placeholder.idx)
+                if (!layoutPlaceholder) return null
+
+                const style = getPlaceholderStyle(layoutPlaceholder)
+
+                if (placeholder.type === 'text') {
+                  const isCurrentlyEditing = isEditing === placeholder.idx
+
+                  return (
+                    <div
+                      key={placeholder.idx}
+                      className="border border-dashed border-gray-200 flex items-center justify-center overflow-hidden cursor-text p-1 hover:border-blue-400 hover:bg-blue-50/30"
+                      style={style}
+                      onClick={() => !isCurrentlyEditing && setIsEditing(placeholder.idx)}
+                    >
+                      {isCurrentlyEditing ? (
+                        <textarea
+                          className="w-full h-full border-none outline-none resize-none text-[10px] leading-tight p-0 bg-blue-50"
+                          value={placeholder.content || ''}
+                          onChange={(e) => {
+                            const updatedPlaceholders = slide.placeholders.map(ph =>
+                              ph.idx === placeholder.idx ? { ...ph, content: e.target.value } : ph
+                            )
+                            onUpdate(slide.id, { ...slide, placeholders: updatedPlaceholders })
+                          }}
+                          onBlur={(e) => handleContentUpdate(placeholder.idx, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setIsEditing(null)
+                            }
+                          }}
+                          autoFocus
+                        />
+                      ) : (
+                        <div className="w-full h-full overflow-auto text-[10px] leading-tight text-gray-800 whitespace-pre-wrap break-words">
+                          {placeholder.content || '...'}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+
+                if (placeholder.type === 'image') {
+                  return (
+                    <div
+                      key={placeholder.idx}
+                      className="border border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50/50"
+                      style={style}
+                    >
+                      {placeholder.imageData ? (
+                        <img src={placeholder.imageData} alt="" className="w-full h-full object-contain" />
+                      ) : (
+                        <div className="text-gray-300 text-[8px]">img</div>
+                      )}
+                    </div>
+                  )
+                }
+
+                return null
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
 

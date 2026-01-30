@@ -2,6 +2,9 @@ from flask import Blueprint, request, jsonify
 from services import PPTXService, AIService
 from services.pptx_service import TextOverflowException
 from utils.layout_validator import validate_content_feasibility, get_feasibility_summary
+from utils.validation import validate_pptx_file, validate_image_files, validate_ai_model, validate_boolean_param, ValidationError
+from utils.error_handler import handle_api_errors
+import json
 
 api_blueprint = Blueprint('api', __name__, url_prefix='/api')
 pptx_service = PPTXService()
@@ -14,171 +17,151 @@ def get_ai_service():
     return ai_service
 
 
+def get_layouts_from_request(provided_layouts=None, provided_slide_size=None):
+    """
+    helper to get layouts either from request or stored rules
+    returns (layouts, slide_size) tuple
+    raises ValidationError if no layouts available
+    """
+    if provided_layouts is not None:
+        return provided_layouts, provided_slide_size
+    
+    rules = pptx_service.get_stored_rules()
+    layouts = rules.get('layouts', [])
+    slide_size = rules.get('slide_size')
+    
+    if not layouts:
+        raise ValidationError('no layouts available. please upload a template first.')
+    
+    return layouts, slide_size
+
+
+def store_uploaded_images(request_files, pptx_service):
+    """
+    helper to store uploaded images
+    returns dict mapping image_id to stored path
+    """
+    images = validate_image_files(request_files)
+    image_paths = {}
+    
+    for image_id, file in images.items():
+        stored_path = pptx_service.store_image(image_id, file)
+        image_paths[image_id] = stored_path
+    
+    return image_paths
+
+
 @api_blueprint.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
 
 
 @api_blueprint.route('/extract-rules', methods=['POST'])
+@handle_api_errors
 def extract_rules():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-    
-    if not file.filename.endswith('.pptx'):
-        return jsonify({'error': 'File must be a .pptx file'}), 400
-    
-    try:
-        rules = pptx_service.extract_rules_from_file(file)
-        return jsonify(rules)
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    file = validate_pptx_file(request.files)
+    rules = pptx_service.extract_rules_from_file(file)
+    return jsonify(rules)
 
 
 @api_blueprint.route('/load-template', methods=['POST'])
+@handle_api_errors
 def load_template():
     """load a template file and layouts without extracting (used when loading from DB)"""
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+    file = validate_pptx_file(request.files)
     
-    file = request.files['file']
+    # get layouts and slide_size from form data
+    layouts_json = request.form.get('layouts')
+    slide_size_json = request.form.get('slide_size')
     
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
+    if not layouts_json or not slide_size_json:
+        raise ValidationError('layouts and slide_size are required')
     
-    if not file.filename.endswith('.pptx'):
-        return jsonify({'error': 'File must be a .pptx file'}), 400
+    layouts = json.loads(layouts_json)
+    slide_size = json.loads(slide_size_json)
     
-    try:
-        # get layouts and slide_size from form data
-        layouts_json = request.form.get('layouts')
-        slide_size_json = request.form.get('slide_size')
-        
-        if not layouts_json or not slide_size_json:
-            return jsonify({'error': 'Layouts and slide_size are required'}), 400
-        
-        import json
-        layouts = json.loads(layouts_json)
-        slide_size = json.loads(slide_size_json)
-        
-        pptx_service.load_template_file(file, layouts, slide_size)
-        return jsonify({'success': True, 'message': 'Template loaded successfully'})
-    
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    pptx_service.load_template_file(file, layouts, slide_size)
+    return jsonify({'success': True, 'message': 'template loaded successfully'})
 
 
 @api_blueprint.route('/rules', methods=['GET'])
+@handle_api_errors
 def get_rules():
-    try:
-        rules = pptx_service.get_stored_rules()
-        return jsonify(rules)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    rules = pptx_service.get_stored_rules()
+    return jsonify(rules)
 
 
 @api_blueprint.route('/toggle-layout-special', methods=['POST'])
+@handle_api_errors
 def toggle_layout_special():
     """toggle whether a layout is marked as special"""
-    try:
-        request_data = request.get_json()
-        
-        if not request_data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        layout_name = request_data.get('layout_name')
-        is_special = request_data.get('is_special', False)
-        
-        if not layout_name:
-            return jsonify({'error': 'layout_name is required'}), 400
-        
-        rules = pptx_service.get_stored_rules()
-        layouts = rules.get('layouts', [])
-        
-        found = False
-        for layout in layouts:
-            if layout['name'] == layout_name:
-                layout['is_special'] = is_special
-                found = True
-                break
-        
-        if not found:
-            return jsonify({'error': f'Layout "{layout_name}" not found'}), 404
-        
-        rules['layouts'] = layouts
-        pptx_service.update_stored_rules(rules)
-        
-        return jsonify({
-            'success': True,
-            'message': f'Layout marked as {"special" if is_special else "general"}'
-        })
+    request_data = request.get_json()
     
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    if not request_data:
+        raise ValidationError('no data provided')
+    
+    layout_name = request_data.get('layout_name')
+    is_special = request_data.get('is_special', False)
+    
+    if not layout_name:
+        raise ValidationError('layout_name is required')
+    
+    rules = pptx_service.get_stored_rules()
+    layouts = rules.get('layouts', [])
+    
+    found = False
+    for layout in layouts:
+        if layout['name'] == layout_name:
+            layout['is_special'] = is_special
+            found = True
+            break
+    
+    if not found:
+        raise ValidationError(f'layout "{layout_name}" not found')
+    
+    rules['layouts'] = layouts
+    pptx_service.update_stored_rules(rules)
+    
+    return jsonify({
+        'success': True,
+        'message': f'layout marked as {"special" if is_special else "general"}'
+    })
 
 
 @api_blueprint.route('/intelligent-chunk', methods=['POST'])
+@handle_api_errors
 def intelligent_chunk():
     """ai-driven intelligent chunking: creates slide-ready chunks from raw text + images + layouts"""
-    try:
-        request_data = request.get_json()
-        
-        if not request_data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        raw_text = request_data.get('raw_text', '')
-        images = request_data.get('images', [])
-        provided_layouts = request_data.get('layouts', None)
-        provided_slide_size = request_data.get('slide_size', None)
-        ai_model = request_data.get('ai_model', 'kimi')
-        
-        if not raw_text or not raw_text.strip():
-            return jsonify({'error': 'Raw text is required'}), 400
-        
-        rules = None
-        if provided_layouts is not None:
-            layouts = provided_layouts
-            slide_size = provided_slide_size
-        else:
-            rules = pptx_service.get_stored_rules()
-            layouts = rules.get('layouts', [])
-            slide_size = rules.get('slide_size')
-        
-        if not layouts:
-            return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
-        
-        ai_service = get_ai_service()
-        ai_service.set_model(ai_model)
-        result = ai_service.intelligent_chunk_with_layouts(
-            raw_text=raw_text,
-            images=images,
-            layouts=layouts,
-            slide_size=slide_size
-        )
-        
-        return jsonify({
-            'success': True,
-            'structure': result.get('structure', []),
-            'deck_summary': result.get('deck_summary', {})
-        })
+    request_data = request.get_json()
     
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    if not request_data:
+        raise ValidationError('no data provided')
+    
+    raw_text = request_data.get('raw_text', '')
+    images = request_data.get('images', [])
+    provided_layouts = request_data.get('layouts', None)
+    provided_slide_size = request_data.get('slide_size', None)
+    ai_model = validate_ai_model(request_data.get('ai_model', 'kimi'))
+    
+    if not raw_text or not raw_text.strip():
+        raise ValidationError('raw text is required')
+    
+    layouts, slide_size = get_layouts_from_request(provided_layouts, provided_slide_size)
+    
+    ai_service = get_ai_service()
+    ai_service.set_model(ai_model)
+    result = ai_service.intelligent_chunk_with_layouts(
+        raw_text=raw_text,
+        images=images,
+        layouts=layouts,
+        slide_size=slide_size
+    )
+    
+    return jsonify({
+        'success': True,
+        'structure': result.get('structure', []),
+        'deck_summary': result.get('deck_summary', {})
+    })
 
 
 @api_blueprint.route('/preprocess-content', methods=['POST'])
@@ -358,8 +341,36 @@ def preview_slides():
         for i, slide in enumerate(slides):
             print(f"   slide {i+1}: layout='{slide.get('layout_name')}' with {len(slide.get('placeholders', []))} placeholders")
         
+        # generate preview images if possible
+        preview_images = []
+        try:
+            from utils.pptx_to_images import convert_pptx_to_images
+            
+            # generate actual PPTX file for preview (returns temp file path)
+            temp_pptx_path = pptx_service.generate_deck(
+                slide_specs=slides,
+                allow_overflow=True,  # allow overflow in preview mode
+                return_path=True  # return file path instead of base64
+            )
+            
+            # convert to images
+            preview_images = convert_pptx_to_images(temp_pptx_path, scale=2)
+            
+            # cleanup temp file
+            if os.path.exists(temp_pptx_path):
+                os.unlink(temp_pptx_path)
+            
+            print(f"generated {len(preview_images)} preview images")
+                
+        except Exception as e:
+            print(f"warning: failed to generate preview images: {e}")
+            import traceback
+            traceback.print_exc()
+            # fallback to no preview images (will use placeholder preview)
+        
         return jsonify({
-            'slides': slides
+            'slides': slides,
+            'preview_images': preview_images
         })
     
     except ValueError as e:

@@ -35,6 +35,7 @@ function App() {
     currentTemplateId,
     overflowInfo,
     aiModel,
+    previewImages,
     setAiModel,
     handleFileChange,
     handleUpload,
@@ -45,6 +46,7 @@ function App() {
     handleDeleteLayoutFromCollection,
     handleDeleteTemplate,
     handleRegenerateSlide,
+    handleRefreshPreviews,
     handleCancelGeneration,
     loadTemplate,
     loadTemplates,
@@ -288,6 +290,8 @@ function App() {
                     onRegenerateSlide={handleRegenerateSlide}
                     generating={generating}
                     regeneratingSlideId={regeneratingSlideId}
+                    previewImages={previewImages}
+                    onRefreshPreviews={handleRefreshPreviews}
                   />
                 )}
 

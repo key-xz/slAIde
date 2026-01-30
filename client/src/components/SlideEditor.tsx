@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { SlideSpec, StylingRules, ThemeSettings } from '../types'
 import { SlideCard } from './SlideCard'
 import { ThemeCustomizer } from './ThemeCustomizer'
-import { LoadingIndicator } from './LoadingIndicator'
 
 interface SlideEditorProps {
   slides: SlideSpec[]
@@ -13,9 +12,11 @@ interface SlideEditorProps {
   onRegenerateSlide?: (slideId: string) => void
   generating: boolean
   regeneratingSlideId?: string | null
+  previewImages?: string[]
+  onRefreshPreviews?: () => void
 }
 
-export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGenerate, onRegenerateSlide, generating, regeneratingSlideId }: SlideEditorProps) {
+export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGenerate, onRegenerateSlide, generating, regeneratingSlideId, previewImages = [], onRefreshPreviews }: SlideEditorProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
@@ -82,31 +83,35 @@ export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGe
 
   return (
     <div className="my-8 p-6 bg-white rounded-lg border border-gray-200">
-      {generating ? (
-        <LoadingIndicator 
-          stage="generating" 
-          detail="Building your PowerPoint presentation with all slides and content"
-        />
-      ) : (
-        <>
-          <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
-            <h3 className="m-0 text-lg font-semibold text-gray-900">slides ({slides.length})</h3>
+      <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
+        <h3 className="m-0 text-lg font-semibold text-gray-900">slides ({slides.length})</h3>
+        <div className="flex gap-2">
+          {onRefreshPreviews && previewImages.length > 0 && (
             <button
-              onClick={() => onGenerate(slides)}
-              disabled={slides.length === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer font-medium transition-all hover:bg-green-700 disabled:bg-gray-300 text-sm"
+              onClick={onRefreshPreviews}
+              disabled={generating}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md cursor-pointer font-medium transition-all hover:bg-blue-700 disabled:bg-gray-300 text-sm"
             >
-              download pptx
+              refresh previews
             </button>
-          </div>
+          )}
+          <button
+            onClick={() => onGenerate(slides)}
+            disabled={slides.length === 0 || generating}
+            className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer font-medium transition-all hover:bg-green-700 disabled:bg-gray-300 text-sm"
+          >
+            download pptx
+          </button>
+        </div>
+      </div>
 
-          {/* Theme Customization Section */}
-          <ThemeCustomizer
-            currentTheme={getCurrentTheme()}
-            onThemeUpdate={handleThemeUpdate}
-          />
+      {/* Theme Customization Section */}
+      <ThemeCustomizer
+        currentTheme={getCurrentTheme()}
+        onThemeUpdate={handleThemeUpdate}
+      />
 
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mt-6">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mt-6">
         {slides.map((slide, index) => {
           const layout = rules.layouts.find(l => l.name === slide.layout_name)
           return (
@@ -129,13 +134,12 @@ export function SlideEditor({ slides, rules, onSlidesUpdate, onRulesUpdate, onGe
                 onRegenerate={onRegenerateSlide}
                 isDragging={draggedIndex === index}
                 regenerating={regeneratingSlideId === slide.id}
+                previewImage={previewImages[index]}
               />
             </div>
           )
         })}
-          </div>
-        </>
-      )}
+      </div>
     </div>
   )
 }

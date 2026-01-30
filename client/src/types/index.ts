@@ -16,15 +16,28 @@ export interface LayoutCategory {
   isPredefined: boolean
 }
 
+export interface Shape {
+  type: string
+  name?: string
+  position: {
+    left: number
+    top: number
+    width: number
+    height: number
+  }
+  properties?: Record<string, unknown>
+}
+
 export interface Layout {
   name: string
   master_name: string
   layout_idx: number
   placeholders: Placeholder[]
-  shapes?: any[]
+  shapes?: Shape[]
   category?: string
   categoryConfidence?: number
   categoryRationale?: string
+  is_special?: boolean
 }
 
 export interface ThemeSettings {
@@ -46,21 +59,31 @@ export interface ThemeSettings {
   }
 }
 
+export interface MasterSlide {
+  name: string
+  properties?: Record<string, unknown>
+}
+
+export interface SlideData {
+  layout_name: string
+  placeholders: Placeholder[]
+}
+
 export interface StylingRules {
   slide_size: {
     width: number
     height: number
   }
-  masters: any[]
-  slides: any[]
+  masters: MasterSlide[]
+  slides: SlideData[]
   layouts: Layout[]
   layoutCategories?: LayoutCategory[]
   theme_data?: {
     fonts: ThemeSettings['fonts']
     color_scheme: ThemeSettings['colors']
-    format_scheme: any
-    backgrounds: any[]
-    theme_raw: any
+    format_scheme: Record<string, unknown>
+    backgrounds: unknown[]
+    theme_raw: unknown
   }
   customTheme?: ThemeSettings
 }
@@ -104,10 +127,25 @@ export interface TextChunk {
   linkedImageIds: string[]
 }
 
+export interface AIGeneratedSlide {
+  layout_name: string
+  layout_rationale?: string
+  content: Record<string, string>
+}
+
+export interface ContentStructure {
+  slides: AIGeneratedSlide[]
+  deck_summary?: {
+    title?: string
+    topic?: string
+    key_themes?: string[]
+  }
+}
+
 export interface ContentWithLinks {
   chunks: TextChunk[]
   images: TaggedImage[]
-  aiGeneratedStructure?: any
+  aiGeneratedStructure?: ContentStructure
 }
 
 export interface Template {
@@ -132,11 +170,51 @@ export interface LayoutRow {
   name: string
   master_name: string
   layout_idx: number
-  placeholders: any
-  shapes?: any
+  placeholders: Placeholder[]
+  shapes?: Shape[]
   category?: string
   category_confidence?: number
   category_rationale?: string
   created_at: string
   updated_at: string
 }
+
+export interface APIResponse<T = unknown> {
+  success: boolean
+  message?: string
+  error?: string
+  data?: T
+}
+
+export interface GenerateResponse {
+  slides: Array<{
+    layout_name: string
+    placeholders: Array<{
+      idx: number
+      type: string
+      content?: string
+      image_index?: number
+    }>
+  }>
+  images?: Record<string, string>
+}
+
+export interface OverflowDetail {
+  slide_index: number
+  layout_name: string
+  placeholder_idx: number
+  placeholder_name: string
+  overflow_ratio: number
+  original_content: string
+}
+
+export interface TextOverflowError {
+  error: string
+  overflow?: {
+    violation_count: number
+    details: OverflowDetail[]
+    slide_specs: SlideSpec[]
+  }
+}
+
+export type AIModel = 'fast' | 'openai' | 'kimi'

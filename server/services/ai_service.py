@@ -55,6 +55,56 @@ class AIService:
             self.current_provider = 'openrouter'
             print(f"switched to Kimi (moonshotai/kimi-k2.5)")
 
+    def _clean_json_response(self, raw_json: str) -> str:
+        """clean common JSON formatting issues from AI responses"""
+        import re
+        
+        # fix common escape sequence issues in JSON strings
+        # this is a conservative fix that only handles strings within quotes
+        def fix_string_escapes(match):
+            string_content = match.group(1)
+            # replace invalid single backslashes with double backslashes
+            # but preserve valid escape sequences: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+            fixed = re.sub(
+                r'\\(?!["\\/bfnrtu])',
+                r'\\\\',
+                string_content
+            )
+            return f'"{fixed}"'
+        
+        # apply fix to all string values in JSON (content between quotes)
+        # this pattern matches strings but avoids keys
+        cleaned = re.sub(
+            r'"([^"]*(?:\\.[^"]*)*)"',
+            fix_string_escapes,
+            raw_json
+        )
+        
+        return cleaned
+    
+    def _safe_json_parse(self, raw_content: str, context_name: str = "response") -> dict:
+        """safely parse JSON with automatic cleaning and detailed error messages"""
+        try:
+            return json.loads(raw_content)
+        except json.JSONDecodeError as e:
+            print(f"{context_name} JSON parse failed: {e}")
+            print(f"attempting to clean and retry...")
+            
+            # try cleaning the JSON
+            cleaned_content = self._clean_json_response(raw_content)
+            try:
+                result = json.loads(cleaned_content)
+                print(f"{context_name} successfully parsed after cleaning")
+                return result
+            except json.JSONDecodeError as e2:
+                # show context around error
+                error_pos = e2.pos if hasattr(e2, 'pos') else 0
+                context_start = max(0, error_pos - 100)
+                context_end = min(len(raw_content), error_pos + 100)
+                error_context = raw_content[context_start:context_end]
+                print(f"\nJSON error context:\n{error_context}\n")
+                raise ValueError(f"Failed to parse {context_name} as JSON: {str(e2)}\nError near: ...{error_context}...")
+    
     def _chat(self, messages, response_format_json=True, **kwargs):
         params = {
             'model': self.model,
@@ -226,10 +276,10 @@ Return ONLY valid JSON."""
             print("\n" + "="*80)
             print("CONTENT STRUCTURE PREPROCESSING:")
             print("="*80)
-            print(raw_content)
+            print(raw_content[:500] + "..." if len(raw_content) > 500 else raw_content)
             print("="*80 + "\n")
             
-            result = json.loads(raw_content)
+            result = self._safe_json_parse(raw_content, "preprocessing")
             
             if 'structure' not in result:
                 raise ValueError("AI response missing 'structure' field")
@@ -587,7 +637,7 @@ Each chunk should already know which layout to use and which images to pair with
                 response_format_json=True,
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = self._safe_json_parse(response.choices[0].message.content, "intelligent_chunk")
             
             if 'slides' not in result:
                 raise ValueError("AI response missing 'slides' field")
@@ -709,7 +759,7 @@ Return corrected JSON with MORE SLIDES."""
                         response_format_json=True,
                     )
                     
-                    retry_result = json.loads(retry_response.choices[0].message.content)
+                    retry_result = self._safe_json_parse(retry_response.choices[0].message.content, "intelligent_chunk_retry")
                     
                     if 'slides' in retry_result:
                         slides = retry_result['slides']
@@ -839,7 +889,7 @@ Return JSON:
                 response_format_json=True,
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = self._safe_json_parse(response.choices[0].message.content, "placeholder_conversion")
             slides = result.get('slides', [])
             
             # add missing fields
@@ -2672,7 +2722,7 @@ Return ONLY valid JSON."""
                     response_format_json=True,
                 )
                 
-                result = json.loads(response.choices[0].message.content)
+                result = self._safe_json_parse(response.choices[0].message.content, "content_shortening")
                 updates = result.get('slides_to_update', [])
                 
                 # apply updates
@@ -3283,7 +3333,7 @@ compression tasks:
                 temperature=0.3,
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = self._safe_json_parse(response.choices[0].message.content, "compression")
             
             # apply compressed content to slide spec
             compressed_slide = dict(slide_spec)

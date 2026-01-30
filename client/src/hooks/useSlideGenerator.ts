@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react'
 import * as api from '../services/api'
 import * as templateApi from '../services/templates'
-import type { StylingRules, SlideSpec, TaggedImage, Template } from '../types'
+import type { StylingRules, SlideSpec, TaggedImage, Template, ContentStructure, OverflowDetail, AIModel } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import { getErrorMessage } from '../utils/errorHelpers'
+import { generateSlideId } from '../utils/idGenerator'
+import { transformApiResponseToSlides } from '../utils/apiTransformers'
+import { DEFAULT_AI_MODEL } from '../constants'
 
 export function useSlideGenerator() {
   const { user } = useAuth()
@@ -16,13 +20,14 @@ export function useSlideGenerator() {
   const [generatedFile, setGeneratedFile] = useState<string | null>(null)
   const [slides, setSlides] = useState<SlideSpec[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
-  const [contentStructure, setContentStructure] = useState<any>(null)
+  const [contentStructure, setContentStructure] = useState<ContentStructure | null>(null)
   const [preprocessing, setPreprocessing] = useState(false)
   const [imageStore, setImageStore] = useState<TaggedImage[]>([])
   const [regeneratingSlideId, setRegeneratingSlideId] = useState<string | null>(null)
-  const [overflowInfo, setOverflowInfo] = useState<{ count: number; details: any[] } | null>(null)
-  const [aiModel, setAiModel] = useState<'openai' | 'kimi' | 'fast'>('fast')
+  const [overflowInfo, setOverflowInfo] = useState<{ count: number; details: OverflowDetail[] } | null>(null)
+  const [aiModel, setAiModel] = useState<AIModel>(DEFAULT_AI_MODEL)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const [previewImages, setPreviewImages] = useState<string[]>([])
 
   // load user's templates when authenticated
   useEffect(() => {
@@ -46,7 +51,8 @@ export function useSlideGenerator() {
         await loadTemplate(mostRecent.id)
       }
     } catch (err) {
-      console.error('failed to load templates:', err)
+      // silently fail - templates will be empty
+      setError(getErrorMessage(err))
     }
   }
 
@@ -71,7 +77,6 @@ export function useSlideGenerator() {
             const file = new File([fileBlob], template.name + '.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
             await api.loadTemplateFile(file, stylingRules.layouts, stylingRules.slide_size)
           } catch (fileErr) {
-            console.error('failed to load template file:', fileErr)
             setError('warning: template file not available. you can preview slides but downloads will fail. please re-upload this template to fix.')
           }
         } else {
@@ -79,7 +84,7 @@ export function useSlideGenerator() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to load template')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -173,7 +178,7 @@ export function useSlideGenerator() {
       if (err instanceof Error && err.name === 'AbortError') {
         setError('generation cancelled')
       } else {
-        setError(err instanceof Error ? err.message : 'an error occurred')
+        setError(getErrorMessage(err))
       }
     } finally {
       setPreprocessing(false)
@@ -199,6 +204,9 @@ export function useSlideGenerator() {
 
     try {
       const data = await api.generateSlidePreviewWithLinks(contentStructure, imageStore, rules?.layouts || [])
+      
+      // store preview images if available
+      setPreviewImages(data.preview_images || [])
       
       const slidesWithData: SlideSpec[] = data.slides.map((slide: any, index: number) => ({
         id: `slide-${Date.now()}-${index}`,
@@ -227,6 +235,39 @@ export function useSlideGenerator() {
       setContentStructure(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'an error occurred')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleRefreshPreviews = async () => {
+    if (!rules || slides.length === 0) {
+      return
+    }
+
+    setPreviewLoading(true)
+    setError(null)
+
+    try {
+      // convert current slides back to the structure format expected by the API
+      const structuredContent = {
+        structure: slides.map(slide => ({
+          layout_name: slide.layout_name,
+          placeholders: slide.placeholders.map(ph => ({
+            idx: ph.idx,
+            type: ph.type,
+            content: ph.type === 'text' ? ph.content : undefined,
+            image_index: ph.type === 'image' ? ph.image_index : undefined,
+          })),
+        })),
+      }
+
+      const data = await api.generateSlidePreviewWithLinks(structuredContent, imageStore, rules.layouts)
+      
+      // update preview images
+      setPreviewImages(data.preview_images || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to refresh previews')
     } finally {
       setPreviewLoading(false)
     }
@@ -478,6 +519,7 @@ export function useSlideGenerator() {
     currentTemplateId,
     overflowInfo,
     aiModel,
+    previewImages,
     setAiModel,
     handleFileChange,
     handleUpload,
@@ -490,6 +532,7 @@ export function useSlideGenerator() {
     handleDeleteLayoutFromCollection,
     handleDeleteTemplate,
     handleRegenerateSlide,
+    handleRefreshPreviews,
     loadTemplate,
     loadTemplates,
     saveCurrentTemplate,

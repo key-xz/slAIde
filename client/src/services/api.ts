@@ -239,7 +239,7 @@ export async function generateSlidePreviewWithLinks(
   structuredContent: any,
   images: TaggedImage[],
   layouts: any[]
-): Promise<{ slides: any[] }> {
+): Promise<{ slides: any[]; preview_images?: string[] }> {
   return fetchApi('/api/preview-slides', {
     method: 'POST',
     headers: {

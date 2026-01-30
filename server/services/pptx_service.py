@@ -687,7 +687,19 @@ class PPTXService:
         
         return violations
     
-    def generate_deck(self, slide_specs, custom_theme=None, allow_overflow=False):
+    def generate_deck(self, slide_specs, custom_theme=None, allow_overflow=False, return_path=False):
+        """
+        generate a PowerPoint deck from slide specifications
+        
+        Args:
+            slide_specs: list of slide specifications
+            custom_theme: optional theme overrides
+            allow_overflow: if False, raises TextOverflowException on overflow
+            return_path: if True, returns temp file path instead of base64 (for preview generation)
+        
+        Returns:
+            base64-encoded PPTX data (default) or temp file path (if return_path=True)
+        """
         if not self.template_path or not os.path.exists(self.template_path):
             error_msg = 'No template presentation available. '
             if self.template_path:
@@ -701,15 +713,21 @@ class PPTXService:
         if not isinstance(slide_specs, list):
             raise ValueError(f'slide_specs must be a list, got {type(slide_specs)}')
         
-        # Load BOTH the source (for cloning) and target (for output)
+        # Load source template for cloning
         source_prs = Presentation(self.template_path)
+        
+        # Create target presentation with same template (for layouts/masters)
+        # We need the layouts from the template to be available
         target_prs = Presentation(self.template_path)
         
-        # Clear all slides from target
-        for i in range(len(target_prs.slides) - 1, -1, -1):
-            rId = target_prs.slides._sldIdLst[i].rId
+        # Remove all slides from target in a safe way
+        # Use python-pptx's built-in slide removal
+        xml_slides = target_prs.slides._sldIdLst
+        slides_to_remove = list(range(len(xml_slides)))
+        for idx in reversed(slides_to_remove):
+            rId = xml_slides[idx].rId
             target_prs.part.drop_rel(rId)
-            del target_prs.slides._sldIdLst[i]
+            del xml_slides[idx]
         
         # Apply custom theme overrides if provided
         if custom_theme:
@@ -796,6 +814,15 @@ class PPTXService:
                 # raise exception so caller can handle (offer compression or retry)
                 raise TextOverflowException(violations, overflow_details, slide_specs)
         
+        # if return_path is True, save to temp file and return path (for preview generation)
+        if return_path:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pptx')
+            temp_file.close()
+            target_prs.save(temp_file.name)
+            print(f"  saved temp PPTX to: {temp_file.name}")
+            return temp_file.name
+        
+        # default: return base64 encoded data (for download)
         output = BytesIO()
         target_prs.save(output)
         output.seek(0)

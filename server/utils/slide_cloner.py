@@ -142,23 +142,34 @@ def _fill_placeholder_in_cloned_slide(target_slide, source_shape, content_item, 
                     image_bytes = base64.b64decode(image_data_b64)
                     image_stream = BytesIO(image_bytes)
                     
-                    # save placeholder position and dimensions
-                    left = target_placeholder.left
-                    top = target_placeholder.top
-                    width = target_placeholder.width
-                    height = target_placeholder.height
-                    
-                    # ALWAYS use fallback method to ensure user image overrides any template image
-                    # remove the placeholder entirely (including any design images it contains)
+                    # Try to insert picture into the placeholder (safest method)
                     try:
-                        sp = target_placeholder.element
-                        sp.getparent().remove(sp)
-                    except:
-                        pass
-                    
-                    # add user's picture at exact placeholder position
-                    target_slide.shapes.add_picture(image_stream, left, top, width, height)
-                    print(f"        ✓ filled image placeholder {idx}: {filename} (overriding template image)")
+                        # save placeholder position and dimensions
+                        left = target_placeholder.left
+                        top = target_placeholder.top
+                        width = target_placeholder.width
+                        height = target_placeholder.height
+                        
+                        # Method 1: Try using placeholder's built-in picture insertion
+                        if hasattr(target_placeholder, 'insert_picture'):
+                            target_placeholder.insert_picture(image_stream)
+                            print(f"        ✓ filled image placeholder {idx}: {filename} (using insert_picture)")
+                        else:
+                            # Method 2: Clear placeholder and add picture at same position
+                            # This is safer than removing the element
+                            placeholder_id = target_placeholder.shape_id
+                            
+                            # Add picture at exact same position
+                            pic = target_slide.shapes.add_picture(image_stream, left, top, width, height)
+                            print(f"        ✓ filled image placeholder {idx}: {filename} (added picture)")
+                    except Exception as img_err:
+                        print(f"        warning: could not insert image into placeholder {idx}: {img_err}")
+                        # Fallback: just add the picture
+                        try:
+                            target_slide.shapes.add_picture(image_stream, left, top, width, height)
+                            print(f"        ✓ filled image placeholder {idx}: {filename} (fallback method)")
+                        except Exception as fallback_err:
+                            print(f"        error: failed to add image: {fallback_err}")
     
     except Exception as e:
         print(f"        error filling placeholder {idx}: {e}")
@@ -180,10 +191,15 @@ def _copy_background(source_slide, target_slide):
 def _validate_shape_positions(slide, presentation):
     """
     validate that all shapes on the slide are within slide bounds.
-    uses deterministic python-pptx position calculations.
+    DISABLED: Shape position modifications can corrupt PowerPoint files.
     """
+    # DO NOT modify shape positions - this can corrupt the PPTX file
+    # The template should already have valid positions
+    # If shapes are out of bounds, it's better to warn than to corrupt the file
+    
     slide_width = presentation.slide_width
     slide_height = presentation.slide_height
+    violations = []
     
     for shape in slide.shapes:
         try:
@@ -198,38 +214,15 @@ def _validate_shape_positions(slide, presentation):
             right = left + width
             bottom = top + height
             
-            # check and fix bounds
-            if left < 0:
-                shape.left = 0
-                print(f"        adjusted shape left position: {left} -> 0")
-            
-            if top < 0:
-                shape.top = 0
-                print(f"        adjusted shape top position: {top} -> 0")
-            
-            if right > slide_width:
-                if width < slide_width:
-                    new_left = slide_width - width
-                    shape.left = new_left
-                    print(f"        adjusted shape to fit within right edge: left {left} -> {new_left}")
-                else:
-                    # shape too wide - shrink it
-                    new_width = slide_width - 100000
-                    shape.width = new_width
-                    shape.left = 50000
-                    print(f"        resized shape (too wide): width {width} -> {new_width}")
-            
-            if bottom > slide_height:
-                if height < slide_height:
-                    new_top = slide_height - height
-                    shape.top = new_top
-                    print(f"        adjusted shape to fit within bottom edge: top {top} -> {new_top}")
-                else:
-                    # shape too tall - shrink it
-                    new_height = slide_height - 100000
-                    shape.height = new_height
-                    shape.top = 50000
-                    print(f"        resized shape (too tall): height {height} -> {new_height}")
+            # check bounds but DO NOT modify
+            if left < 0 or top < 0 or right > slide_width or bottom > slide_height:
+                shape_name = getattr(shape, 'name', 'Unknown')
+                violations.append(f"        warning: shape '{shape_name}' outside bounds (left={left}, top={top}, right={right}, bottom={bottom})")
         
         except Exception as e:
             print(f"        warning: could not validate shape position: {e}")
+    
+    if violations:
+        for v in violations:
+            print(v)
+        print(f"        found {len(violations)} shape(s) outside bounds - template may need adjustment")
