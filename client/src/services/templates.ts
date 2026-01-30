@@ -194,13 +194,23 @@ export async function getTemplate(templateId: string): Promise<StylingRules | nu
 
 // delete a template (cascades to layouts)
 export async function deleteTemplate(templateId: string): Promise<void> {
-  const { error } = await supabase
+  // delete layouts first so this works even if db cascade isn't configured
+  const { error: layoutsError } = await supabase
+    .from('layouts')
+    .delete()
+    .eq('template_id', templateId)
+
+  if (layoutsError) {
+    throw new Error(`failed to delete template layouts: ${layoutsError.message}`)
+  }
+
+  const { error: templateError } = await supabase
     .from('templates')
     .delete()
     .eq('id', templateId)
 
-  if (error) {
-    throw new Error(`failed to delete template: ${error.message}`)
+  if (templateError) {
+    throw new Error(`failed to delete template: ${templateError.message}`)
   }
 }
 

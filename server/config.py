@@ -18,8 +18,18 @@ class Config:
     MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', 52428800))
     ALLOWED_EXTENSIONS = {'.pptx'}
     TEMP_DIR = os.path.join(os.path.dirname(__file__), 'temp')
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    AI_MODEL = os.getenv('AI_MODEL', 'gpt-4o')
+    # openrouter (openai-compatible) configuration
+    # prefer OPENROUTER_API_KEY; fall back to OPENAI_API_KEY for convenience during migration
+    OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
+    OPENROUTER_BASE_URL = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
+    OPENROUTER_SITE_URL = os.getenv('OPENROUTER_SITE_URL')
+    OPENROUTER_APP_NAME = os.getenv('OPENROUTER_APP_NAME', 'slAIde')
+
+    # default to kimi via openrouter
+    AI_MODEL = os.getenv('AI_MODEL', 'moonshotai/kimi-k2.5')
+
+    # optional: use a separate model for multimodal (image) analysis
+    AI_VISION_MODEL = os.getenv('AI_VISION_MODEL', 'openai/gpt-4o-mini')
     
     @staticmethod
     def init_app(app):

@@ -5,11 +5,42 @@ from config import Config
 
 class AIService:
     def __init__(self):
-        api_key = Config.OPENAI_API_KEY
+        api_key = Config.OPENROUTER_API_KEY
         if not api_key:
-            raise ValueError('OPENAI_API_KEY not found in environment variables')
-        self.client = OpenAI(api_key=api_key)
+            raise ValueError('OPENROUTER_API_KEY not found in environment variables')
+
+        default_headers = {}
+        if Config.OPENROUTER_SITE_URL:
+            default_headers['HTTP-Referer'] = Config.OPENROUTER_SITE_URL
+        if Config.OPENROUTER_APP_NAME:
+            default_headers['X-Title'] = Config.OPENROUTER_APP_NAME
+
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=Config.OPENROUTER_BASE_URL,
+            default_headers=default_headers or None,
+        )
         self.model = Config.AI_MODEL
+
+    def _chat(self, messages, response_format_json=True, **kwargs):
+        params = {
+            'model': self.model,
+            'messages': messages,
+            **kwargs,
+        }
+
+        if response_format_json:
+            params['response_format'] = {"type": "json_object"}
+
+        try:
+            return self.client.chat.completions.create(**params)
+        except Exception as e:
+            # openrouter/model may not support response_format; retry without it
+            message = str(e)
+            if response_format_json and ('response_format' in message or 'Unknown parameter' in message):
+                params.pop('response_format', None)
+                return self.client.chat.completions.create(**params)
+            raise
     
     def preprocess_content_structure(self, content_text, layouts, num_images=0, slide_size=None):
         """
@@ -144,13 +175,12 @@ Use special slides (title, TOC, section dividers, closing) appropriately if avai
 Return ONLY valid JSON."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text_prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             raw_content = response.choices[0].message.content
@@ -507,13 +537,12 @@ Create intelligent slide-ready chunks considering the available layouts and imag
 Each chunk should already know which layout to use and which images to pair with its text."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             result = json.loads(response.choices[0].message.content)
@@ -625,15 +654,14 @@ Original text (use ALL of it, split across more slides):
 Return corrected JSON with MORE SLIDES."""
 
                 try:
-                    retry_response = self.client.chat.completions.create(
-                        model=self.model,
+                    retry_response = self._chat(
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                             {"role": "assistant", "content": response.choices[0].message.content},
                             {"role": "user", "content": feedback_prompt}
                         ],
-                        response_format={"type": "json_object"}
+                        response_format_json=True,
                     )
                     
                     retry_result = json.loads(retry_response.choices[0].message.content)
@@ -759,12 +787,11 @@ Return JSON:
 }}"""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat(
                 messages=[
                     {"role": "user", "content": conversion_prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             result = json.loads(response.choices[0].message.content)
@@ -1021,13 +1048,12 @@ Ensure smooth narrative flow while maintaining all text-image bindings.
 Return ONLY valid JSON."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text_prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             raw_content = response.choices[0].message.content
@@ -1891,13 +1917,12 @@ Current layout: {slide.get('layout_name', 'unknown')}
 Optimize this slide by choosing the best layout. Return ONLY valid JSON."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text_prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             raw_content = response.choices[0].message.content
@@ -2048,8 +2073,7 @@ Optimize this slide by choosing the best layout. Return ONLY valid JSON."""
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
+            response = self._chat(
                 messages=[
                     {
                         "role": "system",
@@ -2084,8 +2108,9 @@ return JSON only:
                         ]
                     }
                 ],
+                model=Config.AI_VISION_MODEL,
                 max_tokens=300,
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             content = response.choices[0].message.content
@@ -2261,10 +2286,9 @@ Generate a complete slide deck. Return ONLY valid JSON (no markdown, no explanat
                     {"role": "user", "content": text_prompt}
                 ]
             
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self._chat(
                 messages=messages,
-                response_format={"type": "json_object"}
+                response_format_json=True,
             )
             
             raw_content = response.choices[0].message.content
@@ -2563,12 +2587,11 @@ Return JSON with ONLY the slides that need changes:
 
 Return ONLY valid JSON."""
 
-                response = self.client.chat.completions.create(
-                    model=self.model,
+                response = self._chat(
                     messages=[
                         {"role": "user", "content": shorten_prompt}
                     ],
-                    response_format={"type": "json_object"}
+                    response_format_json=True,
                 )
                 
                 result = json.loads(response.choices[0].message.content)
