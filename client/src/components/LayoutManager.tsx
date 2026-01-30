@@ -1,16 +1,12 @@
 import type { StylingRules, Layout } from '../types'
-import { LayoutCategoryManager } from './LayoutCategoryManager'
 
 interface LayoutManagerProps {
   rules: StylingRules
   onDeleteLayout: (layoutName: string) => void
-  onCategoryChange: (layoutName: string, categoryId: string) => void
-  onAddCustomCategory: (categoryName: string) => void
 }
 
-export function LayoutManager({ rules, onDeleteLayout, onCategoryChange, onAddCustomCategory }: LayoutManagerProps) {
+export function LayoutManager({ rules, onDeleteLayout }: LayoutManagerProps) {
   const aspectRatio = rules.slide_size.height / rules.slide_size.width
-  const availableCategories = rules.layoutCategories || []
 
   const categoryCounts = rules.layouts.reduce((acc, layout) => {
     const cat = layout.category || 'uncategorized'
@@ -30,14 +26,12 @@ export function LayoutManager({ rules, onDeleteLayout, onCategoryChange, onAddCu
         </div>
       </div>
       <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-gray-700">
-        <strong>AI-categorized:</strong> layouts are semantically categorized by AI into groups like title slides, 
-        dividers, content slides, etc. You can manually adjust categories or add custom ones.
+        <strong>capacity-based categories:</strong> layouts are automatically categorized by content capacity 
+        (e.g., "2 text (1 large, 1 small) + 1 image") to help AI select appropriate layouts for your content.
       </div>
       
       <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6">
         {rules.layouts.map((layout: Layout, idx: number) => {
-          const categoryInfo = availableCategories.find(c => c.id === layout.category)
-          
           return (
             <div key={idx} className="group bg-white border-2 border-gray-200 rounded-lg overflow-hidden transition-all shadow-sm hover:border-blue-400">
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
@@ -46,9 +40,14 @@ export function LayoutManager({ rules, onDeleteLayout, onCategoryChange, onAddCu
                     <div className="text-[10px] font-mono text-gray-500 uppercase truncate mb-1" title={layout.name}>
                       {layout.name}
                     </div>
-                    {categoryInfo && (
+                    {layout.category && (
                       <div className="text-[9px] text-blue-600 font-medium">
-                        {categoryInfo.name}
+                        {layout.category}
+                      </div>
+                    )}
+                    {layout.categoryRationale && (
+                      <div className="text-[8px] text-gray-500 mt-0.5">
+                        {layout.categoryRationale}
                       </div>
                     )}
                   </div>
@@ -60,13 +59,6 @@ export function LayoutManager({ rules, onDeleteLayout, onCategoryChange, onAddCu
                     ✕
                   </button>
                 </div>
-                
-                <LayoutCategoryManager
-                  layout={layout}
-                  availableCategories={availableCategories}
-                  onCategoryChange={onCategoryChange}
-                  onAddCustomCategory={onAddCustomCategory}
-                />
               </div>
             
             <div className="p-4">

@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as api from '../services/api'
-import type { StylingRules, SlideSpec, ContentWithLinks, TaggedImage, TextChunk } from '../types'
+import * as templateApi from '../services/templates'
+import type { StylingRules, SlideSpec, TaggedImage, Template } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 export function useSlideGenerator() {
+  const { user } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [rules, setRules] = useState<StylingRules | null>(null)
+  const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(null)
+  const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -13,9 +18,66 @@ export function useSlideGenerator() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [contentStructure, setContentStructure] = useState<any>(null)
   const [preprocessing, setPreprocessing] = useState(false)
-  const [contentWithLinks, setContentWithLinks] = useState<ContentWithLinks | null>(null)
   const [imageStore, setImageStore] = useState<TaggedImage[]>([])
   const [regeneratingSlideId, setRegeneratingSlideId] = useState<string | null>(null)
+
+  // load user's templates when authenticated
+  useEffect(() => {
+    if (user) {
+      loadTemplates()
+    } else {
+      setTemplates([])
+      setRules(null)
+      setCurrentTemplateId(null)
+    }
+  }, [user])
+
+  const loadTemplates = async () => {
+    try {
+      const userTemplates = await templateApi.getUserTemplates()
+      setTemplates(userTemplates)
+      
+      // auto-load the most recently used template
+      if (userTemplates.length > 0 && !rules) {
+        const mostRecent = userTemplates[0]
+        await loadTemplate(mostRecent.id)
+      }
+    } catch (err) {
+      console.error('failed to load templates:', err)
+    }
+  }
+
+  const loadTemplate = async (templateId: string) => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      const stylingRules = await templateApi.getTemplate(templateId)
+      if (stylingRules) {
+        setRules(stylingRules)
+        setCurrentTemplateId(templateId)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to load template')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveCurrentTemplate = async (name: string, description?: string) => {
+    if (!rules) {
+      throw new Error('no rules to save')
+    }
+
+    try {
+      const { template } = await templateApi.saveTemplate(name, rules, description)
+      setCurrentTemplateId(template.id)
+      await loadTemplates() // refresh template list
+      return template
+    } catch (err) {
+      throw err
+    }
+  }
 
   const handleFileChange = (selectedFile: File | null) => {
     if (selectedFile) {
@@ -27,7 +89,7 @@ export function useSlideGenerator() {
     }
   }
 
-  const handleUpload = async () => {
+  const handleUpload = async (templateName?: string) => {
     if (!file) {
       setError('please select a file first')
       return
@@ -39,6 +101,14 @@ export function useSlideGenerator() {
     try {
       const data = await api.extractRules(file)
       setRules(data)
+      
+      // auto-save if user is authenticated
+      if (user) {
+        const name = templateName || file.name.replace('.pptx', '')
+        const { template } = await templateApi.saveTemplate(name, data)
+        setCurrentTemplateId(template.id)
+        await loadTemplates()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'an error occurred')
     } finally {
@@ -46,19 +116,24 @@ export function useSlideGenerator() {
     }
   }
 
-  const handlePreprocessContent = async (content: ContentWithLinks) => {
+  const handlePreprocessContent = async (content: any) => {
     setPreprocessing(true)
     setError(null)
-    setContentWithLinks(content)
     setImageStore(content.images)
 
     try {
-      const data = await api.preprocessContentWithLinks(
-        content.chunks,
-        content.images,
-        rules?.layouts || []
-      )
-      setContentStructure(data.structure)
+      // if ai has already generated structure (intelligent chunking), use it directly
+      if (content.aiGeneratedStructure) {
+        setContentStructure(content.aiGeneratedStructure)
+      } else {
+        // traditional flow: preprocess manual chunks
+        const data = await api.preprocessContentWithLinks(
+          content.chunks,
+          content.images,
+          rules?.layouts || []
+        )
+        setContentStructure(data.structure)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'an error occurred')
     } finally {
@@ -118,9 +193,15 @@ export function useSlideGenerator() {
     setError(null)
 
     try {
-      const data = await api.generateSlidePreview(contentText, images, rules?.layouts || [])
+      const data = await api.generateSlidePreview(contentText, images)
       
-      setImageStore(images)
+      setImageStore(images.map((img, idx) => ({
+        id: `img-${Date.now()}-${idx}`,
+        filename: img.filename,
+        data: img.data,
+        preview: img.data,
+        tags: []
+      })))
       
       const slidesWithData: SlideSpec[] = data.slides.map((slide: any, index: number) => ({
         id: `slide-${Date.now()}-${index}`,
@@ -173,44 +254,42 @@ export function useSlideGenerator() {
     }
   }
 
-  const handleDeleteLayout = (layoutName: string) => {
-    if (rules) {
-      setRules({
-        ...rules,
-        layouts: rules.layouts.filter((l) => l.name !== layoutName),
-      })
+  const handleDeleteLayout = async (layoutName: string) => {
+    if (!rules) return
+
+    // optimistically update UI
+    const updatedRules = {
+      ...rules,
+      layouts: rules.layouts.filter((l) => l.name !== layoutName),
+    }
+    setRules(updatedRules)
+
+    // if we have a saved template, delete from database
+    if (currentTemplateId && user) {
+      try {
+        await templateApi.deleteLayout(currentTemplateId, layoutName)
+        await loadTemplates()
+      } catch (err) {
+        // rollback on error
+        setRules(rules)
+        setError(err instanceof Error ? err.message : 'failed to delete layout')
+      }
     }
   }
 
-  const handleCategoryChange = async (layoutName: string, categoryId: string) => {
+  const handleDeleteTemplate = async (templateId: string) => {
     try {
-      await api.updateLayoutCategory(layoutName, categoryId)
+      await templateApi.deleteTemplate(templateId)
       
-      if (rules) {
-        setRules({
-          ...rules,
-          layouts: rules.layouts.map(l => 
-            l.name === layoutName ? { ...l, category: categoryId, category_confidence: 1.0 } : l
-          )
-        })
+      // if deleting current template, clear state
+      if (templateId === currentTemplateId) {
+        setRules(null)
+        setCurrentTemplateId(null)
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to update category')
-    }
-  }
-
-  const handleAddCustomCategory = async (categoryName: string) => {
-    try {
-      const result = await api.addCustomCategory(categoryName)
       
-      if (rules && result.category) {
-        setRules({
-          ...rules,
-          layoutCategories: [...(rules.layoutCategories || []), result.category]
-        })
-      }
+      await loadTemplates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to add category')
+      setError(err instanceof Error ? err.message : 'failed to delete template')
     }
   }
 
@@ -282,6 +361,8 @@ export function useSlideGenerator() {
     contentStructure,
     preprocessing,
     regeneratingSlideId,
+    templates,
+    currentTemplateId,
     handleFileChange,
     handleUpload,
     handlePreprocessContent,
@@ -289,9 +370,11 @@ export function useSlideGenerator() {
     handleGeneratePreview,
     handleGenerateDeck,
     handleDeleteLayout,
-    handleCategoryChange,
-    handleAddCustomCategory,
+    handleDeleteTemplate,
     handleRegenerateSlide,
+    loadTemplate,
+    loadTemplates,
+    saveCurrentTemplate,
     setSlides,
     setRules,
     setContentStructure,

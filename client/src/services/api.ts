@@ -2,13 +2,18 @@ import { config, API_ENDPOINTS } from '../config'
 import type { StylingRules, PlaceholderInput, TaggedImage, TextChunk } from '../types'
 
 export class ApiError extends Error {
+  statusCode?: number
+  data?: any
+  
   constructor(
     message: string,
-    public statusCode?: number,
-    public data?: any
+    statusCode?: number,
+    data?: any
   ) {
     super(message)
     this.name = 'ApiError'
+    this.statusCode = statusCode
+    this.data = data
   }
 }
 
@@ -55,22 +60,6 @@ export async function extractRules(file: File): Promise<StylingRules> {
 export async function getRules(): Promise<StylingRules> {
   return fetchApi<StylingRules>(API_ENDPOINTS.getRules, {
     method: 'GET',
-  })
-}
-
-export async function generateSlide(
-  layoutName: string,
-  inputs: Record<string, PlaceholderInput>
-): Promise<{ success: boolean; message: string; file: string }> {
-  return fetchApi(API_ENDPOINTS.generateSlide, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      layout_name: layoutName,
-      inputs,
-    }),
   })
 }
 
@@ -143,6 +132,29 @@ export async function generateDeckFromSlides(
       images,
       slides,
       customTheme,
+    }),
+  })
+}
+
+export async function intelligentChunk(
+  rawText: string,
+  images: TaggedImage[]
+): Promise<{ success: boolean; structure: any; deck_summary: any }> {
+  return fetchApi('/api/intelligent-chunk', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      raw_text: rawText,
+      images: images.map(img => ({
+        id: img.id,
+        filename: img.filename,
+        data: img.data,
+        tags: img.tags,
+        visionDescription: img.visionDescription,
+        visionLabels: img.visionLabels,
+      })),
     }),
   })
 }
@@ -249,18 +261,3 @@ export async function analyzeImage(imageData: string) {
   })
 }
 
-export async function updateLayoutCategory(layoutName: string, categoryId: string) {
-  return fetchApi('/api/update-layout-category', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ layout_name: layoutName, category_id: categoryId })
-  })
-}
-
-export async function addCustomCategory(categoryName: string) {
-  return fetchApi('/api/add-custom-category', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ category_name: categoryName })
-  })
-}

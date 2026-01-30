@@ -107,4 +107,35 @@ export interface TextChunk {
 export interface ContentWithLinks {
   chunks: TextChunk[]
   images: TaggedImage[]
+  aiGeneratedStructure?: any
+}
+
+export interface Template {
+  id: string
+  user_id: string
+  name: string
+  description?: string
+  slide_size: {
+    width: number
+    height: number
+  }
+  theme_data?: any
+  custom_theme?: any
+  created_at: string
+  updated_at: string
+}
+
+export interface LayoutRow {
+  id: string
+  template_id: string
+  name: string
+  master_name: string
+  layout_idx: number
+  placeholders: any
+  shapes?: any
+  category?: string
+  category_confidence?: number
+  category_rationale?: string
+  created_at: string
+  updated_at: string
 }

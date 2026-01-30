@@ -6,11 +6,15 @@ import { ContentStructurePreview } from './components/ContentStructurePreview'
 import { SlideEditor } from './components/SlideEditor'
 import { DownloadSection } from './components/DownloadSection'
 import { LayoutManager } from './components/LayoutManager'
+import { TemplateSelector } from './components/TemplateSelector'
 import { ErrorDisplay } from './components/ErrorDisplay'
+import { UserMenu } from './components/UserMenu'
+import { useAuth } from './contexts/AuthContext'
 
 type Tab = 'assets' | 'generate'
 
 function App() {
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>('assets')
   
   const {
@@ -25,15 +29,17 @@ function App() {
     contentStructure,
     preprocessing,
     regeneratingSlideId,
+    templates,
+    currentTemplateId,
     handleFileChange,
     handleUpload,
     handlePreprocessContent,
     handleGenerateFromStructure,
     handleGenerateDeck,
     handleDeleteLayout,
-    handleCategoryChange,
-    handleAddCustomCategory,
+    handleDeleteTemplate,
     handleRegenerateSlide,
+    loadTemplate,
     setSlides,
     setRules,
     setContentStructure,
@@ -42,7 +48,10 @@ function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <div className="flex-shrink-0 bg-gray-50 border-b border-gray-200">
-        <h1 className="px-8 pt-4 pb-2 text-2xl font-semibold">slAIde</h1>
+        <div className="px-8 pt-4 pb-2 flex justify-between items-center">
+          <h1 className="text-2xl font-semibold">slAIde</h1>
+          <UserMenu />
+        </div>
         <div className="flex px-8">
           <button
             className={`px-6 py-3 font-medium text-sm transition-all border-b-2 ${
@@ -70,7 +79,19 @@ function App() {
       <div className="flex-1 overflow-y-auto p-8">
         {activeTab === 'assets' && (
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-xl font-semibold mb-6">upload template</h2>
+            {user && templates.length > 0 && (
+              <TemplateSelector
+                templates={templates}
+                currentTemplateId={currentTemplateId}
+                onSelectTemplate={loadTemplate}
+                onDeleteTemplate={handleDeleteTemplate}
+                loading={loading}
+              />
+            )}
+            
+            <h2 className="text-xl font-semibold mb-6">
+              {user && templates.length > 0 ? 'upload new template' : 'upload template'}
+            </h2>
             <FileUploadSection
               file={file}
               loading={loading}
@@ -78,7 +99,7 @@ function App() {
               onUpload={handleUpload}
             />
             {error && <ErrorDisplay error={error} />}
-            {rules && <LayoutManager rules={rules} onDeleteLayout={handleDeleteLayout} onCategoryChange={handleCategoryChange} onAddCustomCategory={handleAddCustomCategory} />}
+            {rules && <LayoutManager rules={rules} onDeleteLayout={handleDeleteLayout} />}
           </div>
         )}
 

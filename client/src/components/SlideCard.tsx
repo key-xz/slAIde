@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SlideSpec, Layout, StylingRules } from '../types'
+import { LayoutPreviewSelector } from './LayoutPreviewSelector'
 
 interface SlideCardProps {
   slide: SlideSpec
@@ -26,6 +27,7 @@ export function SlideCard({
 }: SlideCardProps) {
   const [isEditing, setIsEditing] = useState<number | null>(null)
   const [showRegenerateModal, setShowRegenerateModal] = useState(false)
+  const [showLayoutSelector, setShowLayoutSelector] = useState(false)
 
   const handleContentUpdate = (placeholderIdx: number, newContent: string) => {
     const updatedPlaceholders = slide.placeholders.map(ph =>
@@ -105,7 +107,6 @@ export function SlideCard({
   const aspectRatio = rules.slide_size.height / rules.slide_size.width
 
   const layoutsByCategory: Record<string, typeof rules.layouts> = {}
-  const availableCategories = rules.layoutCategories || []
   
   rules.layouts.forEach(layout => {
     const cat = layout.category || 'uncategorized'
@@ -132,29 +133,17 @@ export function SlideCard({
         <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex justify-between items-center gap-2">
           <span className="font-semibold text-blue-600 text-xs whitespace-nowrap">slide {slideNumber}</span>
 
-          <select
-            value={slide.layout_name}
-            onChange={(e) => handleLayoutChange(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowLayoutSelector(true)
+            }}
             disabled={regenerating}
-            className="flex-1 px-2 py-1 border border-gray-300 rounded text-[10px] bg-white cursor-pointer hover:border-blue-500 min-w-0 disabled:opacity-50"
-            title="change layout"
+            className="flex-1 px-2 py-1 border border-gray-300 rounded text-[10px] bg-white hover:border-blue-500 hover:bg-blue-50 min-w-0 disabled:opacity-50 transition-colors text-left truncate"
+            title="change layout (click for preview)"
           >
-            {Object.entries(layoutsByCategory).map(([categoryId, layouts]) => {
-              const categoryInfo = availableCategories.find(c => c.id === categoryId)
-              const label = categoryInfo ? categoryInfo.name : categoryId.replace('_', ' ')
-              
-              return (
-                <optgroup key={categoryId} label={label}>
-                  {layouts.map(l => (
-                    <option key={l.name} value={l.name}>
-                      {l.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )
-            })}
-          </select>
+            {slide.layout_name}
+          </button>
 
           {onRegenerate && (
             <button
@@ -272,6 +261,16 @@ export function SlideCard({
           </div>
         </div>
       </div>
+    )}
+
+    {showLayoutSelector && (
+      <LayoutPreviewSelector
+        currentLayoutName={slide.layout_name}
+        layouts={rules.layouts}
+        rules={rules}
+        onSelect={handleLayoutChange}
+        onClose={() => setShowLayoutSelector(false)}
+      />
     )}
   </>
   )

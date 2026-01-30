@@ -24,6 +24,8 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
   const [images, setImages] = useState<TaggedImage[]>([])
   const [rawText, setRawText] = useState('')
   const [chunks, setChunks] = useState<TextChunk[]>([])
+  const [useAiChunking, setUseAiChunking] = useState(true)
+  const [aiChunking, setAiChunking] = useState(false)
 
   const generateUniqueId = () => `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
@@ -47,6 +49,8 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
       return
     }
 
+    // simple paragraph split as initial preview
+    // ai will do intelligent chunking on backend considering layouts + images + text
     const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
     let currentIndex = 0
     const newChunks: TextChunk[] = []
@@ -70,9 +74,41 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
     setChunks(newChunks)
   }
 
+  const handleAiChunking = async () => {
+    if (!rawText.trim()) {
+      alert('please enter some content first')
+      return
+    }
+
+    setAiChunking(true)
+
+    try {
+      const result = await api.intelligentChunk(rawText, images)
+      
+      // ai has already created the slide structure, pass it with deck_summary
+      onPreprocess({
+        chunks: [],
+        images,
+        aiGeneratedStructure: {
+          structure: result.structure,
+          deck_summary: result.deck_summary
+        }
+      })
+    } catch (err) {
+      alert(`ai chunking failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally {
+      setAiChunking(false)
+    }
+  }
+
   const handlePreprocess = () => {
     if (!rawText.trim()) {
       alert('please enter some content first')
+      return
+    }
+
+    if (useAiChunking) {
+      handleAiChunking()
       return
     }
 
@@ -119,7 +155,11 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
   const analyzeImagesInBackground = async (imagesToAnalyze: TaggedImage[]) => {
     for (const img of imagesToAnalyze) {
       try {
-        const analysis = await api.analyzeImage(img.data)
+        const analysis = await api.analyzeImage(img.data) as {
+          visionDescription?: string
+          visionLabels?: string[]
+          recommendedLayoutStyle?: string
+        }
         
         setImages(prev => prev.map(i => 
           i.id === img.id 
@@ -133,7 +173,7 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
             : i
         ))
         
-        console.log(`analyzed ${img.filename}: ${analysis.visionDescription}`)
+        console.log(`analyzed ${img.filename}: ${analysis.visionDescription || 'no description'}`)
         
       } catch (err) {
         console.error(`failed to analyze ${img.filename}:`, err)
@@ -379,38 +419,73 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
             )}
           </div>
 
-          <div className="bg-white p-6 rounded-lg border border-gray-200">
-            <h3 className="text-lg font-semibold mb-4">3. link images to content chunks</h3>
-            
-            <ContentLinkingEditor
-              images={images}
-              onImagesChange={setImages}
-              chunks={chunks}
-              onChunksChange={setChunks}
-              rawText={rawText}
-              onRawTextChange={(text) => {
-                setRawText(text)
-                autoDetectChunks(text)
-              }}
-            />
-          </div>
+          {!useAiChunking && (
+            <div className="bg-white p-6 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-semibold mb-4">3. link images to content chunks</h3>
+              
+              <ContentLinkingEditor
+                images={images}
+                onImagesChange={setImages}
+                chunks={chunks}
+                onChunksChange={setChunks}
+                rawText={rawText}
+                onRawTextChange={(text) => {
+                  setRawText(text)
+                  autoDetectChunks(text)
+                }}
+              />
+            </div>
+          )}
 
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={useAiChunking}
+                  onChange={() => setUseAiChunking(true)}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm font-medium">ai intelligent chunking</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={!useAiChunking}
+                  onChange={() => setUseAiChunking(false)}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm font-medium">manual chunk linking</span>
+              </label>
+            </div>
+
+            {useAiChunking && (
+              <p className="text-xs text-gray-600 max-w-2xl text-center">
+                ai will analyze your text + images + layouts together to create optimized slide chunks.
+                considers layout capacity, image relevance, and presentation flow.
+              </p>
+            )}
+
+            {!useAiChunking && (
+              <p className="text-xs text-gray-600 max-w-2xl text-center">
+                manually link images to text chunks above. ai will then structure slides respecting your bindings.
+              </p>
+            )}
+            
             <button
               onClick={handlePreprocess}
-              disabled={preprocessing || !rawText.trim()}
+              disabled={preprocessing || aiChunking || !rawText.trim()}
               className="px-8 py-3 bg-blue-600 text-white rounded-md cursor-pointer font-semibold transition-all hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              {preprocessing ? 'processing...' : 'generate slide structure'}
+              {(preprocessing || aiChunking) ? 'processing...' : 'generate slide structure'}
             </button>
-            <p className="text-xs text-gray-500">
-              {chunks.length} chunk{chunks.length !== 1 ? 's' : ''} • {images.length} image{images.length !== 1 ? 's' : ''} •{' '}
-              {chunks.reduce((sum, c) => sum + c.linkedImageIds.length, 0)} link{chunks.reduce((sum, c) => sum + c.linkedImageIds.length, 0) !== 1 ? 's' : ''}
-            </p>
-            <p className="text-xs text-gray-400 max-w-2xl text-center">
-              the AI will use image tags (logo, graph, etc.) to select appropriate layouts. 
-              for example: a "logo" tag will prefer layouts with small corner images, not side-by-side views.
-            </p>
+            
+            {!useAiChunking && (
+              <p className="text-xs text-gray-500">
+                {chunks.length} chunk{chunks.length !== 1 ? 's' : ''} • {images.length} image{images.length !== 1 ? 's' : ''} •{' '}
+                {chunks.reduce((sum, c) => sum + c.linkedImageIds.length, 0)} link{chunks.reduce((sum, c) => sum + c.linkedImageIds.length, 0) !== 1 ? 's' : ''}
+              </p>
+            )}
           </div>
         </>
       )}

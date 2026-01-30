@@ -10,10 +10,12 @@ slAIde transforms unorganized content into professional PowerPoint presentations
 
 ## Features
 - **Template Management**: Upload PowerPoint templates to extract layouts, styling rules, and placeholders
+- **Template Persistence**: Save templates to database for access across sessions and devices (requires authentication)
 - **AI Content Organization**: Submit unorganized content and images; AI structures it into slides
 - **Smart Layout Selection**: AI automatically chooses appropriate layouts for each slide
 - **Content-Image Pairing**: AI intelligently pairs images with relevant text content
 - **Deterministic Rendering**: All slides generated via python-pptx for consistent, template-adherent output
+- **User Authentication**: Secure login via Supabase with email/password or magic links
 - **Tab-based Interface**: Separate workflows for asset upload, deck generation, and editing
 - Environment-based configuration
 - Modular, maintainable codebase
@@ -69,8 +71,15 @@ bun install
 
 3. Configure environment variables:
 ```bash
-cp .env.example .env.development
-# Edit .env.development if needed
+cp .env.example .env.local
+# Edit .env.local with your API and Supabase credentials
+```
+
+Required environment variables:
+```bash
+VITE_API_BASE_URL=http://localhost:5000
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 4. Run the development server:
@@ -80,6 +89,23 @@ bun run dev
 ```
 
 The frontend will run on `http://localhost:5173`
+
+### Authentication & Database Setup (Optional but Recommended)
+
+To enable template persistence and user authentication:
+
+1. **Create a Supabase project**: Follow the complete guide in [SUPABASE_SETUP.md](./SUPABASE_SETUP.md)
+
+2. **Run the database schema**: 
+   - Copy contents of `supabase-schema.sql`
+   - Paste in Supabase SQL Editor
+   - Click "Run"
+
+3. **Configure environment variables** (already done in step 3 above)
+
+Without authentication, the app works in "ephemeral mode" where templates are stored only during the session.
+
+For complete details on database persistence, see [DATABASE_PERSISTENCE.md](./DATABASE_PERSISTENCE.md)
 
 ## Configuration
 
