@@ -757,14 +757,40 @@ def extract_slide_as_layout(slide, layout_index, pptx_path=None):
     
     for shape in slide.shapes:
         try:
-            # determine if this is likely a title based on position
-            # typical slide height is around 5143500 EMUs
-            # use top 20% as title area (about 1028700 EMUs)
+            # determine if this is likely a TITLE/SUBTITLE placeholder
+            #
+            # IMPORTANT:
+            # Many templates have placeholder runs with font.size == None, so we fall back to theme defaults.
+            # If we choose the wrong default (body vs title), the AI will massively mis-estimate capacity:
+            # it will think a title box is 18pt and put paragraphs in it, but PowerPoint renders it at 44pt.
+            #
+            # So we must classify title placeholders using placeholder type/name (NOT only y-position).
+            is_likely_title = False
             try:
-                slide_height = 5143500  # standard 16:9 slide height in EMUs
-                is_likely_title = shape.top < (slide_height * 0.2)
-            except:
-                is_likely_title = False
+                if getattr(shape, "is_placeholder", False) and hasattr(shape, "placeholder_format"):
+                    placeholder_type = shape.placeholder_format.type
+                    # PP_PLACEHOLDER.* varies by python-pptx version; compare by name too
+                    pt_str = str(placeholder_type).upper()
+                    if "TITLE" in pt_str or "CENTER_TITLE" in pt_str or "SUBTITLE" in pt_str:
+                        is_likely_title = True
+            except Exception:
+                pass
+
+            # fallback: shape naming conventions used by PowerPoint
+            try:
+                name_u = (shape.name or "").upper()
+                if "TITLE" in name_u or "SUBTITLE" in name_u:
+                    is_likely_title = True
+            except Exception:
+                pass
+
+            # final fallback: y-position heuristic (less reliable across templates/sizes)
+            if not is_likely_title:
+                try:
+                    slide_height = 5143500  # standard 16:9 height in EMUs (best-effort)
+                    is_likely_title = shape.top < (slide_height * 0.25)  # slightly less strict than 20%
+                except Exception:
+                    is_likely_title = False
             
             default_font = default_fonts['title'] if is_likely_title else default_fonts['body']
             print(f"      shape '{shape.name}' at y={shape.top}, using {'title' if is_likely_title else 'body'} font defaults")

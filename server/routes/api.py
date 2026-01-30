@@ -92,27 +92,45 @@ def toggle_layout_special():
         return jsonify({'error': str(e)}), 500
 
 
-@api_blueprint.route('/generate-slide', methods=['POST'])
-def generate_slide():
+@api_blueprint.route('/intelligent-chunk', methods=['POST'])
+def intelligent_chunk():
+    """ai-driven intelligent chunking: creates slide-ready chunks from raw text + images + layouts"""
     try:
-        data = request.get_json()
-        layout_name = data.get('layout_name')
-        inputs = data.get('inputs', {})
+        request_data = request.get_json()
         
-        if not layout_name:
-            return jsonify({'error': 'Layout name is required'}), 400
+        if not request_data:
+            return jsonify({'error': 'No data provided'}), 400
         
-        file_b64 = pptx_service.generate_slide(layout_name, inputs)
+        raw_text = request_data.get('raw_text', '')
+        images = request_data.get('images', [])
+        
+        if not raw_text or not raw_text.strip():
+            return jsonify({'error': 'Raw text is required'}), 400
+        
+        rules = pptx_service.get_stored_rules()
+        layouts = rules.get('layouts', [])
+        
+        if not layouts:
+            return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
+        
+        result = get_ai_service().intelligent_chunk_with_layouts(
+            raw_text=raw_text,
+            images=images,
+            layouts=layouts,
+            slide_size=rules.get('slide_size')
+        )
         
         return jsonify({
             'success': True,
-            'message': 'Slide generated successfully',
-            'file': file_b64
+            'structure': result.get('structure', []),
+            'deck_summary': result.get('deck_summary', {})
         })
     
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -476,62 +494,3 @@ def analyze_image():
         return jsonify({'error': str(e)}), 500
 
 
-@api_blueprint.route('/update-layout-category', methods=['POST'])
-def update_layout_category():
-    """update layout category assignment"""
-    try:
-        request_data = request.get_json()
-        layout_name = request_data.get('layout_name')
-        category_id = request_data.get('category_id')
-        
-        rules = pptx_service.get_stored_rules()
-        
-        for layout in rules.get('layouts', []):
-            if layout['name'] == layout_name:
-                layout['category'] = category_id
-                layout['category_confidence'] = 1.0
-                break
-        
-        pptx_service.update_stored_rules(rules)
-        
-        return jsonify({'success': True})
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@api_blueprint.route('/add-custom-category', methods=['POST'])
-def add_custom_category():
-    """add new custom category to rules"""
-    try:
-        request_data = request.get_json()
-        category_name = request_data.get('category_name')
-        
-        rules = pptx_service.get_stored_rules()
-        categories = rules.get('layoutCategories', [])
-        
-        category_id = category_name.lower().replace(' ', '_')
-        
-        if any(cat['id'] == category_id for cat in categories):
-            return jsonify({'error': 'Category already exists'}), 400
-        
-        categories.append({
-            'id': category_id,
-            'name': category_name,
-            'isPredefined': False
-        })
-        
-        rules['layoutCategories'] = categories
-        pptx_service.update_stored_rules(rules)
-        
-        return jsonify({
-            'success': True,
-            'category': {
-                'id': category_id,
-                'name': category_name,
-                'isPredefined': False
-            }
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500

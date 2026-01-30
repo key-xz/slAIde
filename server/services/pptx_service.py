@@ -12,7 +12,6 @@ from utils.style_extractor import (
     apply_placeholder_styling
 )
 from utils.slide_layout_extractor import extract_all_slides_as_layouts
-from utils.slide_generator import generate_slide_from_template
 
 
 class PPTXService:
@@ -20,6 +19,7 @@ class PPTXService:
         self.stored_rules = None
         self.template_path = None
         self.uploaded_images = {}
+        self.image_order = []  # track insertion order for image_index lookup
     
     def cleanup_template(self):
         if self.template_path and os.path.exists(self.template_path):
@@ -52,16 +52,10 @@ class PPTXService:
             # STRICT VALIDATION: Fail fast if critical design specs are missing
             self._validate_complete_extraction(prs, layouts, theme_data)
             
-            from config import PREDEFINED_LAYOUT_CATEGORIES
             from services.ai_service import AIService
             
             ai_service = AIService()
-            categorization_result = ai_service.categorize_layouts(
-                layouts, 
-                PREDEFINED_LAYOUT_CATEGORIES
-            )
-            
-            all_categories = PREDEFINED_LAYOUT_CATEGORIES + categorization_result['new_categories']
+            categorization_result = ai_service.categorize_layouts(layouts)
             
             rules = {
                 'slide_size': {
@@ -69,8 +63,7 @@ class PPTXService:
                     'height': prs.slide_height
                 },
                 'layouts': categorization_result['layouts'],
-                'layoutCategories': all_categories,
-                'theme_data': theme_data,  # Include complete theme data
+                'theme_data': theme_data,
                 'extraction_method': 'rigid_slide_templates'
             }
             
@@ -184,7 +177,7 @@ class PPTXService:
         
         # If any errors found, fail fast
         if errors:
-            error_message = "❌ TEMPLATE EXTRACTION FAILED - Incomplete design specifications:\n\n"
+            error_message = "TEMPLATE EXTRACTION FAILED - Incomplete design specifications:\n\n"
             error_message += "\n".join(f"  • {err}" for err in errors)
             error_message += "\n\nPlease upload a valid PowerPoint template with complete formatting information."
             error_message += "\nEnsure the template has:"
@@ -193,76 +186,20 @@ class PPTXService:
             error_message += "\n  - Text placeholders with font specifications"
             raise ValueError(error_message)
         
-        print("  ✅ All critical design specifications validated successfully")
+        print("  all critical design specifications validated successfully")
     
     def update_stored_rules(self, rules):
         """update the stored rules (used for modifying layout properties like is_special)"""
         self.stored_rules = rules
     
-    def generate_slide(self, layout_name, inputs):
-        if not self.template_path or not os.path.exists(self.template_path):
-            raise ValueError('No template presentation available')
-        
-        if self.stored_rules is None:
-            raise ValueError('No rules stored')
-        
-        prs = Presentation(self.template_path)
-        
-        target_layout = None
-        for master in prs.slide_masters:
-            for layout in master.slide_layouts:
-                if layout.name == layout_name:
-                    target_layout = layout
-                    break
-            if target_layout:
-                break
-        
-        if not target_layout:
-            raise ValueError(f'Layout "{layout_name}" not found')
-        
-        slide = prs.slides.add_slide(target_layout)
-        
-        for placeholder in slide.placeholders:
-            ph_idx = str(placeholder.placeholder_format.idx)
-            
-            if ph_idx in inputs:
-                input_data = inputs[ph_idx]
-                input_type = input_data.get('type')
-                
-                if input_type == 'text':
-                    text_value = input_data.get('value', '')
-                    if hasattr(placeholder, 'text_frame'):
-                        placeholder.text = text_value
-                
-                elif input_type == 'image':
-                    image_data = input_data.get('value')
-                    if image_data:
-                        if ',' in image_data:
-                            image_data = image_data.split(',')[1]
-                        
-                        image_bytes = base64.b64decode(image_data)
-                        image_stream = BytesIO(image_bytes)
-                        
-                        left = placeholder.left
-                        top = placeholder.top
-                        width = placeholder.width
-                        height = placeholder.height
-                        
-                        sp = placeholder.element
-                        sp.getparent().remove(sp)
-                        slide.shapes.add_picture(image_stream, left, top, width, height)
-        
-        output = BytesIO()
-        prs.save(output)
-        output.seek(0)
-        
-        return base64.b64encode(output.getvalue()).decode('utf-8')
-    
     def store_image(self, filename, image_data_base64):
         self.uploaded_images[filename] = image_data_base64
+        if filename not in self.image_order:
+            self.image_order.append(filename)
     
     def clear_images(self):
         self.uploaded_images = {}
+        self.image_order = []
     
     def _apply_theme_overrides(self, custom_theme):
         """
@@ -320,7 +257,479 @@ class PPTXService:
                                     'rgb': color_info['value']
                                 }
         
-        print(f"  ✅ theme overrides applied to {len(layouts)} layouts")
+        print(f"  theme overrides applied to {len(layouts)} layouts")
+    
+    def _validate_and_fix_shape_positions(self, presentation):
+        """
+        validate that all shapes are positioned within slide bounds.
+        fix any shapes that extend beyond the slide edges.
+        uses deterministic python-pptx calculations.
+        """
+        # get slide dimensions (in EMUs)
+        # standard 16:9 slide: 10" × 5.625" = 9144000 × 5143500 EMUs
+        slide_width = presentation.slide_width
+        slide_height = presentation.slide_height
+        
+        print(f"  slide dimensions: {slide_width / 914400:.2f}\" × {slide_height / 914400:.2f}\" ({slide_width} × {slide_height} EMUs)")
+        
+        issues_found = 0
+        issues_fixed = 0
+        
+        for slide_num, slide in enumerate(presentation.slides, 1):
+            for shape in slide.shapes:
+                try:
+                    # skip shapes without position (e.g., background)
+                    if not hasattr(shape, 'left') or not hasattr(shape, 'top'):
+                        continue
+                    
+                    # get shape bounds
+                    left = shape.left
+                    top = shape.top
+                    width = shape.width
+                    height = shape.height
+                    right = left + width
+                    bottom = top + height
+                    
+                    # check if shape is out of bounds
+                    out_of_bounds = False
+                    adjustments = []
+                    
+                    if left < 0:
+                        out_of_bounds = True
+                        adjustments.append(f"left {left} → 0")
+                        shape.left = 0
+                    
+                    if top < 0:
+                        out_of_bounds = True
+                        adjustments.append(f"top {top} → 0")
+                        shape.top = 0
+                    
+                    if right > slide_width:
+                        out_of_bounds = True
+                        # if shape extends beyond right edge, move it left
+                        if width < slide_width:
+                            new_left = slide_width - width
+                            adjustments.append(f"left {left} → {new_left} (right edge at {right} > {slide_width})")
+                            shape.left = new_left
+                        else:
+                            # shape is too wide for slide - shrink it
+                            new_width = slide_width - 100000  # leave small margin
+                            adjustments.append(f"width {width} → {new_width} (too wide)")
+                            shape.width = new_width
+                            shape.left = 50000  # small margin
+                    
+                    if bottom > slide_height:
+                        out_of_bounds = True
+                        # if shape extends beyond bottom edge, move it up
+                        if height < slide_height:
+                            new_top = slide_height - height
+                            adjustments.append(f"top {top} → {new_top} (bottom edge at {bottom} > {slide_height})")
+                            shape.top = new_top
+                        else:
+                            # shape is too tall for slide - shrink it
+                            new_height = slide_height - 100000  # leave small margin
+                            adjustments.append(f"height {height} → {new_height} (too tall)")
+                            shape.height = new_height
+                            shape.top = 50000  # small margin
+                    
+                    if out_of_bounds:
+                        issues_found += 1
+                        issues_fixed += 1
+                        shape_name = getattr(shape, 'name', 'Unknown')
+                        print(f"    slide {slide_num}, shape '{shape_name}': {', '.join(adjustments)}")
+                
+                except Exception as e:
+                    print(f"    warning: could not validate shape on slide {slide_num}: {e}")
+        
+        if issues_found == 0:
+            print(f"  all shapes within bounds")
+        else:
+            print(f"  fixed {issues_fixed} shapes that were out of bounds")
+    
+    def _enforce_text_fit_by_measurement(self, presentation):
+        """
+        FINAL SAFETY NET: Use actual text frame measurements to detect overflow.
+        Every text box MUST fit within its template boundaries.
+        
+        NOTE: This is a last-resort enforcement. The AI service should have already:
+        1. Generated content within capacity limits
+        2. Created continuation slides for overflow content
+        3. Used bullet points without markers
+        
+        If this enforcement truncates text, it means the AI's capacity estimation was off.
+        The logs will show exactly what was truncated.
+        """
+        total_shortened = 0
+        total_checked = 0
+        overflow_reports = []
+        
+        print(f"  FINAL SAFETY NET: checking all text boxes for overflow...")
+        
+        for slide_num, slide in enumerate(presentation.slides, 1):
+            slide_shortened = 0
+            
+            for shape in slide.shapes:
+                try:
+                    # Only process text frames
+                    if not hasattr(shape, 'text_frame'):
+                        continue
+                    
+                    text_frame = shape.text_frame
+                    if not text_frame.text.strip():
+                        continue
+                    
+                    total_checked += 1
+                    
+                    # Get original text
+                    original_text = text_frame.text
+                    original_len = len(original_text)
+                    
+                    # Get box metrics for debugging
+                    box_info = self._get_box_info(shape, text_frame)
+                    shape_name = getattr(shape, 'name', 'Unknown')
+                    
+                    # CRITICAL: Detect if text overflows template boundaries
+                    needs_shortening = self._detect_text_overflow(shape, text_frame)
+                    
+                    if needs_shortening:
+                        print(f"    ⚠️  slide {slide_num} '{shape_name}': OVERFLOW DETECTED")
+                        print(f"        text: {original_len} chars, '{original_text[:60]}...'")
+                        print(f"        box: {box_info}")
+                        
+                        # Iteratively shorten until it PHYSICALLY fits
+                        fitted_text = self._iteratively_fit_text(shape, text_frame, original_text)
+                        
+                        if fitted_text != original_text:
+                            total_shortened += 1
+                            slide_shortened += 1
+                            overflow_content = original_text[len(fitted_text):]
+                            text_frame.text = fitted_text
+                            reduction_pct = int((1 - len(fitted_text)/original_len) * 100)
+                            
+                            # Store overflow report
+                            overflow_reports.append({
+                                'slide_number': slide_num,
+                                'shape_name': shape_name,
+                                'box_info': box_info,
+                                'original_length': original_len,
+                                'fitted_length': len(fitted_text),
+                                'overflow_content': overflow_content[:100] + '...' if len(overflow_content) > 100 else overflow_content
+                            })
+                            
+                            print(f"    CORRECTED: {original_len} → {len(fitted_text)} chars (-{reduction_pct}%)")
+                            print(f"    LOST CONTENT: '{overflow_content[:80]}...'")
+                    else:
+                        # Log that this box was checked and is OK
+                        if original_len > 200:  # Only log longer text that passed
+                            print(f"    slide {slide_num} '{shape_name}': {original_len} chars fits OK")
+                
+                except Exception as e:
+                    print(f"    error processing text on slide {slide_num}: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            if slide_shortened > 0:
+                print(f"  📊 slide {slide_num}: corrected {slide_shortened} text boxes")
+        
+        print(f"\n  ENFORCEMENT COMPLETE:")
+        print(f"     checked: {total_checked} text boxes")
+        print(f"     corrected: {total_shortened} overflow violations")
+        print(f"     status: {'all text within boundaries' if total_shortened == 0 else 'overflows fixed (content truncated)'}")
+        
+        if overflow_reports:
+            print(f"\n  OVERFLOW REPORT ({len(overflow_reports)} truncations):")
+            for report in overflow_reports:
+                print(f"     • Slide {report['slide_number']} ({report['shape_name']}): {report['original_length']} → {report['fitted_length']} chars")
+                print(f"       Lost: '{report['overflow_content']}'")
+        
+        return overflow_reports
+    
+    def _detect_text_overflow(self, shape, text_frame):
+        """
+        Detect text overflow by attempting to fit text and checking if font size would change.
+        This uses python-pptx's actual text fitting logic for accurate detection.
+        """
+        from pptx.enum.text import MSO_AUTO_SIZE
+        
+        try:
+            # Store ALL original font sizes from all runs
+            original_font_sizes = []
+            if text_frame.paragraphs:
+                for para in text_frame.paragraphs:
+                    for run in para.runs:
+                        if run.font.size:
+                            original_font_sizes.append(run.font.size)
+            
+            # If no explicit font sizes found, use default
+            if not original_font_sizes:
+                original_font_sizes = [914400 * 18 / 72]  # 18pt default
+            
+            # Use the largest font size as reference
+            max_original_font_size = max(original_font_sizes)
+            
+            # Store original auto_size setting
+            original_auto_size = text_frame.auto_size
+            
+            # Attempt to fit text to shape - this will reduce font size if overflow
+            text_frame.word_wrap = True
+            
+            try:
+                text_frame.fit_text(max_size=max_original_font_size)
+            except AttributeError:
+                # fit_text not available in this version, use fallback
+                return self._detect_text_overflow_fallback(shape, text_frame)
+            
+            # Check if ANY font size was reduced (indicates overflow)
+            fitted_font_sizes = []
+            if text_frame.paragraphs:
+                for para in text_frame.paragraphs:
+                    for run in para.runs:
+                        if run.font.size:
+                            fitted_font_sizes.append(run.font.size)
+            
+            # Restore original auto_size
+            text_frame.auto_size = original_auto_size
+            
+            # If any font size was reduced by more than 1%, text overflows
+            overflow_detected = False
+            if fitted_font_sizes:
+                min_fitted = min(fitted_font_sizes)
+                if min_fitted < max_original_font_size * 0.99:
+                    shape_name = getattr(shape, 'name', 'Unknown')
+                    reduction_pct = int((1 - min_fitted/max_original_font_size) * 100)
+                    print(f"      overflow detected: font would need to shrink by {reduction_pct}% to fit")
+                    overflow_detected = True
+            
+            # CRITICAL: Restore ALL original font sizes
+            run_idx = 0
+            for para in text_frame.paragraphs:
+                for run in para.runs:
+                    if run_idx < len(original_font_sizes):
+                        run.font.size = original_font_sizes[run_idx]
+                        run_idx += 1
+            
+            return overflow_detected
+        
+        except Exception as e:
+            # If fit_text fails or isn't supported, fall back to heuristic
+            print(f"      warning: fit_text detection failed ({e}), using fallback")
+            import traceback
+            traceback.print_exc()
+            return self._detect_text_overflow_fallback(shape, text_frame)
+    
+    def _get_box_info(self, shape, text_frame):
+        """Get human-readable box dimensions for debugging."""
+        try:
+            width_in = shape.width / 914400
+            height_in = shape.height / 914400
+            
+            margin_left = getattr(text_frame, 'margin_left', 91440) / 914400
+            margin_right = getattr(text_frame, 'margin_right', 91440) / 914400
+            margin_top = getattr(text_frame, 'margin_top', 45720) / 914400
+            margin_bottom = getattr(text_frame, 'margin_bottom', 45720) / 914400
+            
+            usable_width = width_in - margin_left - margin_right
+            usable_height = height_in - margin_top - margin_bottom
+            
+            font_size = None
+            if text_frame.paragraphs and text_frame.paragraphs[0].runs:
+                if text_frame.paragraphs[0].runs[0].font.size:
+                    font_size = int(text_frame.paragraphs[0].runs[0].font.size / 914400 * 72)
+            
+            return f"{usable_width:.1f}\"×{usable_height:.1f}\" (font: {font_size}pt)"
+        except:
+            return "unknown dimensions"
+    
+    def _detect_text_overflow_fallback(self, shape, text_frame):
+        """
+        Fallback overflow detection using geometry calculations.
+        Used if fit_text() method fails.
+        """
+        try:
+            box_height = shape.height
+            box_width = shape.width
+            
+            margin_left = getattr(text_frame, 'margin_left', 91440)
+            margin_right = getattr(text_frame, 'margin_right', 91440)
+            margin_top = getattr(text_frame, 'margin_top', 45720)
+            margin_bottom = getattr(text_frame, 'margin_bottom', 45720)
+            
+            usable_height = box_height - margin_top - margin_bottom
+            usable_width = box_width - margin_left - margin_right
+            
+            font_size_emu = 914400 * 18 / 72
+            if text_frame.paragraphs:
+                first_para = text_frame.paragraphs[0]
+                if first_para.runs and first_para.runs[0].font.size:
+                    font_size_emu = first_para.runs[0].font.size
+            
+            actual_line_count = self._count_wrapped_lines(text_frame.text, usable_width, font_size_emu)
+            line_height = font_size_emu * 1.5
+            height_needed = actual_line_count * line_height * 1.1
+            
+            return height_needed > usable_height
+        
+        except Exception:
+            return len(text_frame.text) > 300
+    
+    def _count_wrapped_lines(self, text, usable_width_emu, font_size_emu):
+        """
+        Count actual number of lines after word wrapping.
+        Uses realistic character width to simulate text rendering.
+        """
+        if not text.strip():
+            return 0
+        
+        # Average character width in EMUs (proportional to font size)
+        # Use 0.6 * font_size as a realistic average for proportional fonts
+        char_width = font_size_emu * 0.6
+        
+        # Calculate chars that fit per line
+        chars_per_line = max(1, int(usable_width_emu / char_width))
+        
+        # Split text into paragraphs (handle explicit newlines)
+        paragraphs = text.split('\n')
+        
+        total_lines = 0
+        for para in paragraphs:
+            if not para.strip():
+                total_lines += 1  # blank line
+                continue
+            
+            # Wrap this paragraph into lines
+            words = para.split()
+            if not words:
+                total_lines += 1
+                continue
+            
+            current_line_length = 0
+            line_count = 1
+            
+            for word in words:
+                word_length = len(word) + 1  # +1 for space
+                
+                if current_line_length + word_length > chars_per_line:
+                    # Word doesn't fit, wrap to next line
+                    line_count += 1
+                    current_line_length = word_length
+                else:
+                    current_line_length += word_length
+            
+            total_lines += line_count
+        
+        return total_lines
+    
+    def _iteratively_fit_text(self, shape, text_frame, original_text):
+        """
+        Iteratively shorten text until it PHYSICALLY fits within the box boundaries.
+        Uses binary search with ACTUAL overflow detection (fit_text method).
+        """
+        if not original_text.strip():
+            return original_text
+        
+        print(f"        fitting {len(original_text)} chars...")
+        
+        # Binary search to find maximum text that fits
+        min_chars = 0
+        max_chars = len(original_text)
+        best_fit = ""
+        
+        # Start by testing if full text fits
+        text_frame.text = original_text
+        if not self._detect_text_overflow(shape, text_frame):
+            print(f"        full text fits!")
+            return original_text  # Perfect, no shortening needed
+        
+        # Binary search for maximum fitting length (max 20 iterations for precision)
+        iteration_count = 0
+        for iteration in range(20):
+            iteration_count += 1
+            
+            if max_chars - min_chars <= 5:  # Very close
+                break
+            
+            mid_chars = (min_chars + max_chars) // 2
+            if mid_chars <= 0:
+                break
+            
+            # Try text at this length
+            test_text = self._truncate_at_word_boundary(original_text, mid_chars)
+            text_frame.text = test_text
+            
+            # Check if it ACTUALLY overflows using fit_text
+            overflows = self._detect_text_overflow(shape, text_frame)
+            
+            if overflows:
+                # Still too much, try less
+                max_chars = mid_chars
+                print(f"        iter {iteration+1}: {len(test_text)} chars - still overflows")
+            else:
+                # Fits! Save this and try more
+                best_fit = test_text
+                min_chars = mid_chars
+                print(f"        iter {iteration+1}: {len(test_text)} chars - fits!")
+        
+        print(f"        converged after {iteration_count} iterations")
+        
+        # If we found something that fits, use it
+        if best_fit:
+            # Add ellipsis if truncated
+            if len(best_fit) < len(original_text):
+                best_fit = best_fit.rstrip() + '...'
+            print(f"        final: {len(best_fit)} chars")
+            return best_fit
+        
+        # If nothing fits, use a minimal fallback
+        print(f"        extreme overflow - using minimal fallback")
+        fallback = self._truncate_at_word_boundary(original_text, 30)
+        return fallback + '...'
+    
+    def _truncate_at_word_boundary(self, text, max_chars):
+        """truncate text at word boundary near max_chars."""
+        if len(text) <= max_chars:
+            return text
+        
+        truncated = text[:max_chars]
+        
+        # find last space
+        last_space = truncated.rfind(' ')
+        if last_space > max_chars * 0.8:  # if we found a space reasonably close
+            truncated = truncated[:last_space]
+        
+        return truncated.rstrip()
+    
+    def _validate_no_overflow(self, presentation):
+        """
+        Final validation pass: ensure NO text boxes overflow their boundaries.
+        Returns count of violations found.
+        """
+        violations = 0
+        
+        for slide_num, slide in enumerate(presentation.slides, 1):
+            for shape in slide.shapes:
+                try:
+                    if not hasattr(shape, 'text_frame'):
+                        continue
+                    
+                    text_frame = shape.text_frame
+                    if not text_frame.text.strip():
+                        continue
+                    
+                    # Check if this box overflows
+                    if self._detect_text_overflow(shape, text_frame):
+                        violations += 1
+                        shape_name = getattr(shape, 'name', 'Unknown')
+                        print(f"    ❌ VIOLATION: slide {slide_num}, shape '{shape_name}' still overflows!")
+                
+                except Exception as e:
+                    print(f"    warning: validation error on slide {slide_num}: {e}")
+        
+        if violations == 0:
+            print(f"  VALIDATION PASSED: Zero overflow violations detected")
+        else:
+            print(f"  VALIDATION FAILED: {violations} boxes still overflow boundaries")
+        
+        return violations
     
     def generate_deck(self, slide_specs, custom_theme=None):
         if not self.template_path or not os.path.exists(self.template_path):
@@ -342,11 +751,11 @@ class PPTXService:
             target_prs.part.drop_rel(rId)
             del target_prs.slides._sldIdLst[i]
         
-        print(f"\n🔄 cloning {len(slide_specs)} slides from template")
+        print(f"\ncloning {len(slide_specs)} slides from template")
         
         # Apply custom theme overrides if provided
         if custom_theme:
-            print(f"\n🎨 applying custom theme overrides...")
+            print(f"\napplying custom theme overrides...")
             self._apply_theme_overrides(custom_theme)
         
         layouts = self.stored_rules.get('layouts', [])
@@ -391,14 +800,34 @@ class PPTXService:
                     source_slide_index,
                     target_prs,
                     placeholders_data,
-                    self.uploaded_images
+                    self.uploaded_images,
+                    self.image_order
                 )
                 print(f"  ✓ slide cloned successfully from template slide {source_slide_index + 1}")
             except Exception as e:
-                print(f"  ❌ error cloning slide: {e}")
+                print(f"  error cloning slide: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
+        
+        # CRITICAL: Validate and fix all shape positions to ensure they're within slide bounds
+        print(f"\nvalidating shape positions...")
+        self._validate_and_fix_shape_positions(target_prs)
+        
+        # CRITICAL: Final safety net - enforce text fitting using actual measurements
+        print(f"\nFINAL SAFETY NET: Overflow Enforcement...")
+        overflow_reports = self._enforce_text_fit_by_measurement(target_prs)
+        
+        # FINAL VALIDATION: Double-check no overflows remain
+        print(f"\nFINAL VALIDATION...")
+        violations = self._validate_no_overflow(target_prs)
+        if violations > 0:
+            raise ValueError(f"CRITICAL: {violations} text boxes still overflow after enforcement! Generation failed.")
+        
+        # Warn if content was truncated (should rarely happen with good AI chunking)
+        if overflow_reports:
+            print(f"\nWARNING: {len(overflow_reports)} text boxes required truncation.")
+            print(f"    This indicates AI capacity estimation was off. Content may be lost.")
         
         output = BytesIO()
         target_prs.save(output)

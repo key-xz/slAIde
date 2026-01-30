@@ -11,7 +11,7 @@ from copy import deepcopy
 
 
 def clone_slide_with_content(source_presentation, source_slide_index, target_presentation, 
-                             placeholder_contents, uploaded_images):
+                             placeholder_contents, uploaded_images, image_order=None):
     try:
         # Get the source slide
         source_slide = source_presentation.slides[source_slide_index]
@@ -24,10 +24,13 @@ def clone_slide_with_content(source_presentation, source_slide_index, target_pre
         
         # Copy all shapes from source to target
         # This preserves backgrounds, design elements, and all formatting
-        _copy_all_shapes(source_slide, new_slide, placeholder_contents, uploaded_images)
+        _copy_all_shapes(source_slide, new_slide, placeholder_contents, uploaded_images, image_order)
         
         # Apply background if present
         _copy_background(source_slide, new_slide)
+        
+        # Validate shape positions are within slide bounds
+        _validate_shape_positions(new_slide, target_presentation)
         
         print(f"    ✅ cloned slide successfully")
         return new_slide
@@ -39,7 +42,7 @@ def clone_slide_with_content(source_presentation, source_slide_index, target_pre
         raise
 
 
-def _copy_all_shapes(source_slide, target_slide, placeholder_contents, uploaded_images):
+def _copy_all_shapes(source_slide, target_slide, placeholder_contents, uploaded_images, image_order=None):
     content_map = {item['idx']: item for item in placeholder_contents}
     placeholder_counter = 0
     
@@ -56,7 +59,7 @@ def _copy_all_shapes(source_slide, target_slide, placeholder_contents, uploaded_
                 # This is a placeholder - we need to fill it with content
                 if placeholder_counter in content_map:
                     content_item = content_map[placeholder_counter]
-                    _fill_placeholder_in_cloned_slide(target_slide, shape, content_item, uploaded_images, placeholder_counter)
+                    _fill_placeholder_in_cloned_slide(target_slide, shape, content_item, uploaded_images, placeholder_counter, image_order)
                 else:
                     print(f"        placeholder {placeholder_counter} has no content, keeping original")
                 
@@ -70,7 +73,7 @@ def _copy_all_shapes(source_slide, target_slide, placeholder_contents, uploaded_
             print(f"        warning: error processing shape '{shape_name}': {e}")
 
 
-def _fill_placeholder_in_cloned_slide(target_slide, source_shape, content_item, uploaded_images, idx):
+def _fill_placeholder_in_cloned_slide(target_slide, source_shape, content_item, uploaded_images, idx, image_order=None):
     content_type = content_item.get('type')
     
     # Find the corresponding placeholder in the target slide
@@ -95,43 +98,67 @@ def _fill_placeholder_in_cloned_slide(target_slide, source_shape, content_item, 
             # Replace text content
             content = content_item.get('content', '')
             if hasattr(target_placeholder, 'text_frame'):
-                target_placeholder.text_frame.clear()
-                target_placeholder.text_frame.text = content
-                print(f"        ✓ filled text placeholder {idx}: '{content[:50]}...'")
+                text_frame = target_placeholder.text_frame
+                text_frame.clear()
+                text_frame.text = content
+                
+                # CRITICAL: Apply template font size to ensure accurate overflow detection
+                # Get font size from content_item metadata (passed from AI service)
+                template_font_size = content_item.get('font_size')
+                
+                if template_font_size:
+                    # Apply font size to ALL paragraphs and runs
+                    from pptx.util import Pt
+                    font_size_emu = int(template_font_size * 914400 / 72)  # Convert pt to EMU
+                    
+                    for para in text_frame.paragraphs:
+                        for run in para.runs:
+                            run.font.size = font_size_emu
+                    
+                    print(f"        ✓ filled text placeholder {idx} with font {template_font_size}pt: '{content[:50]}...'")
+                else:
+                    print(f"        ✓ filled text placeholder {idx} (no font size): '{content[:50]}...'")
         
         elif content_type == 'image':
-            # Replace image content
             image_index = content_item.get('image_index')
             if image_index is not None:
-                image_filenames = list(uploaded_images.keys())
+                # use image_order if available, otherwise fall back to dict keys
+                if image_order:
+                    image_filenames = image_order
+                    print(f"        using image_order: {image_filenames}")
+                else:
+                    image_filenames = list(uploaded_images.keys())
+                    print(f"        ⚠️  no image_order, using dict keys: {image_filenames}")
+                
+                print(f"        looking for image_index {image_index} in {len(image_filenames)} images")
+                
                 if 0 <= image_index < len(image_filenames):
                     filename = image_filenames[image_index]
                     image_data_b64 = uploaded_images[filename]
+                    print(f"        selected image: {filename}")
                     
-                    # Decode base64
                     if ',' in image_data_b64:
                         image_data_b64 = image_data_b64.split(',')[1]
                     image_bytes = base64.b64decode(image_data_b64)
                     image_stream = BytesIO(image_bytes)
                     
-                    # Insert picture into placeholder
+                    # save placeholder position and dimensions
+                    left = target_placeholder.left
+                    top = target_placeholder.top
+                    width = target_placeholder.width
+                    height = target_placeholder.height
+                    
+                    # ALWAYS use fallback method to ensure user image overrides any template image
+                    # remove the placeholder entirely (including any design images it contains)
                     try:
-                        target_placeholder.insert_picture(image_stream)
-                        print(f"        ✓ filled image placeholder {idx}: {filename}")
-                    except:
-                        # Fallback: add picture manually
-                        left = target_placeholder.left
-                        top = target_placeholder.top
-                        width = target_placeholder.width
-                        height = target_placeholder.height
-                        
-                        # Remove placeholder
                         sp = target_placeholder.element
                         sp.getparent().remove(sp)
-                        
-                        # Add picture
-                        target_slide.shapes.add_picture(image_stream, left, top, width, height)
-                        print(f"        ✓ filled image placeholder {idx} (fallback method): {filename}")
+                    except:
+                        pass
+                    
+                    # add user's picture at exact placeholder position
+                    target_slide.shapes.add_picture(image_stream, left, top, width, height)
+                    print(f"        ✓ filled image placeholder {idx}: {filename} (overriding template image)")
     
     except Exception as e:
         print(f"        ❌ error filling placeholder {idx}: {e}")
@@ -148,3 +175,61 @@ def _copy_background(source_slide, target_slide):
             pass
     except Exception as e:
         print(f"        warning: could not copy background: {e}")
+
+
+def _validate_shape_positions(slide, presentation):
+    """
+    validate that all shapes on the slide are within slide bounds.
+    uses deterministic python-pptx position calculations.
+    """
+    slide_width = presentation.slide_width
+    slide_height = presentation.slide_height
+    
+    for shape in slide.shapes:
+        try:
+            # skip shapes without position
+            if not hasattr(shape, 'left') or not hasattr(shape, 'top'):
+                continue
+            
+            left = shape.left
+            top = shape.top
+            width = shape.width
+            height = shape.height
+            right = left + width
+            bottom = top + height
+            
+            # check and fix bounds
+            if left < 0:
+                shape.left = 0
+                print(f"        ⚠️  adjusted shape left position: {left} → 0")
+            
+            if top < 0:
+                shape.top = 0
+                print(f"        ⚠️  adjusted shape top position: {top} → 0")
+            
+            if right > slide_width:
+                if width < slide_width:
+                    new_left = slide_width - width
+                    shape.left = new_left
+                    print(f"        ⚠️  adjusted shape to fit within right edge: left {left} → {new_left}")
+                else:
+                    # shape too wide - shrink it
+                    new_width = slide_width - 100000
+                    shape.width = new_width
+                    shape.left = 50000
+                    print(f"        ⚠️  resized shape (too wide): width {width} → {new_width}")
+            
+            if bottom > slide_height:
+                if height < slide_height:
+                    new_top = slide_height - height
+                    shape.top = new_top
+                    print(f"        ⚠️  adjusted shape to fit within bottom edge: top {top} → {new_top}")
+                else:
+                    # shape too tall - shrink it
+                    new_height = slide_height - 100000
+                    shape.height = new_height
+                    shape.top = 50000
+                    print(f"        ⚠️  resized shape (too tall): height {height} → {new_height}")
+        
+        except Exception as e:
+            print(f"        warning: could not validate shape position: {e}")
