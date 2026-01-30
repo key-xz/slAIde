@@ -55,10 +55,25 @@ export function useSlideGenerator() {
     setContentStructure(null)
     
     try {
-      const stylingRules = await templateApi.getTemplate(templateId)
-      if (stylingRules) {
+      const result = await templateApi.getTemplate(templateId)
+      if (result) {
+        const { rules: stylingRules, template } = result
         setRules(stylingRules)
         setCurrentTemplateId(templateId)
+        
+        // download and load the template file if it exists
+        if (template.file_path) {
+          try {
+            const fileBlob = await templateApi.downloadTemplateFile(template.file_path)
+            const file = new File([fileBlob], template.name + '.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+            
+            // send file to backend to set up pptx_service
+            await api.loadTemplateFile(file, stylingRules.layouts, stylingRules.slide_size)
+          } catch (fileErr) {
+            console.warn('failed to load template file, deck download may not work:', fileErr)
+            // don't fail the whole operation - user can still preview slides
+          }
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to load template')
@@ -110,7 +125,7 @@ export function useSlideGenerator() {
         try {
           const safeTemplateName = typeof templateName === 'string' ? templateName : undefined
           const name = safeTemplateName || file.name.replace('.pptx', '')
-          const { template } = await templateApi.saveTemplate(name, data)
+          const { template } = await templateApi.saveTemplate(name, data, undefined, file)
           setCurrentTemplateId(template.id)
           await loadTemplates()
         } catch (saveErr) {
@@ -141,7 +156,8 @@ export function useSlideGenerator() {
         const data = await api.preprocessContentWithLinks(
           content.chunks,
           content.images,
-          rules?.layouts || []
+          rules?.layouts || [],
+          rules?.slide_size
         )
         setContentStructure(data.structure)
       }
@@ -254,7 +270,9 @@ export function useSlideGenerator() {
       const data = await api.generateDeckFromSlides(
         slidesForAPI, 
         imageStore, 
-        rules?.customTheme
+        rules?.customTheme,
+        rules?.layouts,
+        rules?.slide_size
       )
       setGeneratedFile(data.file)
       console.log(`generated ${data.slides_count} slides successfully`)

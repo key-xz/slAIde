@@ -190,6 +190,8 @@ function App() {
                   <BulkContentUpload
                     onPreprocess={handlePreprocessContent}
                     preprocessing={preprocessing}
+                    layouts={rules?.layouts || []}
+                    slideSize={rules?.slide_size}
                   />
                 )}
 

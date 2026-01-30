@@ -6,6 +6,8 @@ import * as api from '../services/api'
 interface BulkContentUploadProps {
   onPreprocess: (contentWithLinks: ContentWithLinks) => void
   preprocessing: boolean
+  layouts: any[]
+  slideSize?: { width: number; height: number }
 }
 
 const PREDEFINED_TAGS = [
@@ -20,7 +22,7 @@ const PREDEFINED_TAGS = [
   'brand',
 ]
 
-export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUploadProps) {
+export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideSize }: BulkContentUploadProps) {
   const [images, setImages] = useState<TaggedImage[]>([])
   const [rawText, setRawText] = useState('')
   const [chunks, setChunks] = useState<TextChunk[]>([])
@@ -83,7 +85,7 @@ export function BulkContentUpload({ onPreprocess, preprocessing }: BulkContentUp
     setAiChunking(true)
 
     try {
-      const result = await api.intelligentChunk(rawText, images)
+      const result = await api.intelligentChunk(rawText, images, layouts, slideSize)
       
       // ai has already created the slide structure, pass it with deck_summary
       onPreprocess({

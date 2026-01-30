@@ -1,5 +1,5 @@
 import { config, API_ENDPOINTS } from '../config'
-import type { StylingRules, PlaceholderInput, TaggedImage, TextChunk } from '../types'
+import type { StylingRules, TaggedImage, TextChunk } from '../types'
 
 export class ApiError extends Error {
   statusCode?: number
@@ -57,6 +57,22 @@ export async function extractRules(file: File): Promise<StylingRules> {
   })
 }
 
+export async function loadTemplateFile(
+  file: File,
+  layouts: any[],
+  slideSize: { width: number; height: number }
+): Promise<{ success: boolean; message: string }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('layouts', JSON.stringify(layouts))
+  formData.append('slide_size', JSON.stringify(slideSize))
+
+  return fetchApi<{ success: boolean; message: string }>('/api/load-template', {
+    method: 'POST',
+    body: formData,
+  })
+}
+
 export async function getRules(): Promise<StylingRules> {
   return fetchApi<StylingRules>(API_ENDPOINTS.getRules, {
     method: 'GET',
@@ -71,7 +87,9 @@ export async function checkHealth(): Promise<{ status: string }> {
 
 export async function generateDeck(
   contentText: string,
-  images: Array<{ filename: string; data: string }>
+  images: Array<{ filename: string; data: string }>,
+  layouts?: any[],
+  slideSize?: { width: number; height: number }
 ): Promise<{ success: boolean; message: string; file: string; slides_count: number }> {
   return fetchApi(API_ENDPOINTS.generateDeck, {
     method: 'POST',
@@ -81,6 +99,8 @@ export async function generateDeck(
     body: JSON.stringify({
       content_text: contentText,
       images,
+      layouts,
+      slide_size: slideSize,
     }),
   })
 }
@@ -120,7 +140,9 @@ export async function generateSlidePreview(
 export async function generateDeckFromSlides(
   slides: any[],
   images: Array<{ filename: string; data: string }>,
-  customTheme?: any
+  customTheme?: any,
+  layouts?: any[],
+  slideSize?: { width: number; height: number }
 ): Promise<{ success: boolean; message: string; file: string; slides_count: number }> {
   return fetchApi(API_ENDPOINTS.generateDeck, {
     method: 'POST',
@@ -132,13 +154,17 @@ export async function generateDeckFromSlides(
       images,
       slides,
       customTheme,
+      layouts,
+      slide_size: slideSize,
     }),
   })
 }
 
 export async function intelligentChunk(
   rawText: string,
-  images: TaggedImage[]
+  images: TaggedImage[],
+  layouts: any[],
+  slideSize?: { width: number; height: number }
 ): Promise<{ success: boolean; structure: any; deck_summary: any }> {
   return fetchApi('/api/intelligent-chunk', {
     method: 'POST',
@@ -155,6 +181,8 @@ export async function intelligentChunk(
         visionDescription: img.visionDescription,
         visionLabels: img.visionLabels,
       })),
+      layouts,
+      slide_size: slideSize,
     }),
   })
 }
@@ -162,7 +190,8 @@ export async function intelligentChunk(
 export async function preprocessContentWithLinks(
   chunks: TextChunk[],
   images: TaggedImage[],
-  layouts: any[]
+  layouts: any[],
+  slideSize?: { width: number; height: number }
 ): Promise<{ success: boolean; structure: any }> {
   return fetchApi('/api/preprocess-content', {
     method: 'POST',
@@ -182,6 +211,7 @@ export async function preprocessContentWithLinks(
         tags: img.tags,
       })),
       layouts,
+      slide_size: slideSize,
     }),
   })
 }

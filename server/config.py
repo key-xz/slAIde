@@ -1,10 +1,19 @@
 import os
 from dotenv import load_dotenv
 
-if os.path.exists('.env'):
-    load_dotenv('.env')
-elif os.path.exists('.env.development'):
-    load_dotenv('.env.development')
+_BASE_DIR = os.path.dirname(__file__)
+
+# load env files from the server directory (not the process cwd)
+_env_path = os.path.join(_BASE_DIR, '.env')
+_env_dev_path = os.path.join(_BASE_DIR, '.env.development')
+_env_prod_path = os.path.join(_BASE_DIR, '.env.production')
+
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+elif os.path.exists(_env_dev_path):
+    load_dotenv(_env_dev_path)
+elif os.path.exists(_env_prod_path):
+    load_dotenv(_env_prod_path)
 else:
     load_dotenv()
 

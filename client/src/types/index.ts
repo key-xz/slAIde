@@ -121,6 +121,7 @@ export interface Template {
   }
   theme_data?: any
   custom_theme?: any
+  file_path?: string
   created_at: string
   updated_at: string
 }

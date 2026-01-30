@@ -39,6 +39,41 @@ def extract_rules():
         return jsonify({'error': str(e)}), 500
 
 
+@api_blueprint.route('/load-template', methods=['POST'])
+def load_template():
+    """load a template file and layouts without extracting (used when loading from DB)"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not file.filename.endswith('.pptx'):
+        return jsonify({'error': 'File must be a .pptx file'}), 400
+    
+    try:
+        # get layouts and slide_size from form data
+        layouts_json = request.form.get('layouts')
+        slide_size_json = request.form.get('slide_size')
+        
+        if not layouts_json or not slide_size_json:
+            return jsonify({'error': 'Layouts and slide_size are required'}), 400
+        
+        import json
+        layouts = json.loads(layouts_json)
+        slide_size = json.loads(slide_size_json)
+        
+        # store the file in pptx_service without extracting
+        pptx_service.load_template_file(file, layouts, slide_size)
+        
+        return jsonify({'success': True, 'message': 'Template loaded successfully'})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_blueprint.route('/rules', methods=['GET'])
 def get_rules():
     try:
@@ -103,12 +138,20 @@ def intelligent_chunk():
         
         raw_text = request_data.get('raw_text', '')
         images = request_data.get('images', [])
+        provided_layouts = request_data.get('layouts', None)
+        provided_slide_size = request_data.get('slide_size', None)
         
         if not raw_text or not raw_text.strip():
             return jsonify({'error': 'Raw text is required'}), 400
         
-        rules = pptx_service.get_stored_rules()
-        layouts = rules.get('layouts', [])
+        rules = None
+        if provided_layouts is not None:
+            layouts = provided_layouts
+            slide_size = provided_slide_size
+        else:
+            rules = pptx_service.get_stored_rules()
+            layouts = rules.get('layouts', [])
+            slide_size = rules.get('slide_size')
         
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
@@ -117,7 +160,7 @@ def intelligent_chunk():
             raw_text=raw_text,
             images=images,
             layouts=layouts,
-            slide_size=rules.get('slide_size')
+            slide_size=slide_size
         )
         
         return jsonify({
@@ -146,9 +189,16 @@ def preprocess_content():
         content_chunks = request_data.get('content_chunks', None)
         images = request_data.get('images', [])
         provided_layouts = request_data.get('layouts', None)
+        provided_slide_size = request_data.get('slide_size', None)
         
-        rules = pptx_service.get_stored_rules()
-        layouts = provided_layouts if provided_layouts is not None else rules.get('layouts', [])
+        rules = None
+        if provided_layouts is not None:
+            layouts = provided_layouts
+            slide_size = provided_slide_size
+        else:
+            rules = pptx_service.get_stored_rules()
+            layouts = rules.get('layouts', [])
+            slide_size = rules.get('slide_size')
         
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
@@ -180,7 +230,7 @@ def preprocess_content():
                 content_chunks=content_chunks,
                 images=images,
                 layouts=layouts,
-                slide_size=rules.get('slide_size')
+                slide_size=slide_size
             )
         else:
             content_text = request_data.get('content_text', '')
@@ -193,7 +243,7 @@ def preprocess_content():
                 content_text=content_text,
                 layouts=layouts,
                 num_images=num_images,
-                slide_size=rules.get('slide_size')
+                slide_size=slide_size
             )
         
         return jsonify({
@@ -220,6 +270,7 @@ def preview_slides():
         
         structured_content = request_data.get('structured_content', None)
         images = request_data.get('images', [])
+        provided_layouts = request_data.get('layouts', None)
         
         if not structured_content:
             return jsonify({'error': 'Structured content is required'}), 400
@@ -227,8 +278,11 @@ def preview_slides():
         if not isinstance(images, list):
             return jsonify({'error': 'Images must be an array'}), 400
         
-        rules = pptx_service.get_stored_rules()
-        layouts = rules.get('layouts', [])
+        if provided_layouts is not None:
+            layouts = provided_layouts
+        else:
+            rules = pptx_service.get_stored_rules()
+            layouts = rules.get('layouts', [])
         
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
@@ -320,6 +374,8 @@ def generate_deck():
         images = request_data.get('images', [])
         slides_spec = request_data.get('slides', [])
         custom_theme = request_data.get('customTheme', None)
+        provided_layouts = request_data.get('layouts')
+        provided_slide_size = request_data.get('slide_size')
         
         if not content_text and not slides_spec:
             return jsonify({'error': 'Either content_text or slides specification is required'}), 400
@@ -333,8 +389,14 @@ def generate_deck():
         if not isinstance(slides_spec, list):
             return jsonify({'error': 'Slides must be an array'}), 400
         
-        rules = pptx_service.get_stored_rules()
-        layouts = rules.get('layouts', [])
+        # prioritize provided layouts/slide_size, fallback to stored rules
+        if provided_layouts is not None:
+            layouts = provided_layouts
+            slide_size = provided_slide_size
+        else:
+            rules = pptx_service.get_stored_rules()
+            layouts = rules.get('layouts', [])
+            slide_size = rules.get('slide_size')
         
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
@@ -442,8 +504,11 @@ def regenerate_slide():
         if not slide:
             return jsonify({'error': 'Slide is required'}), 400
         
-        rules = pptx_service.get_stored_rules()
-        layouts = provided_layouts if provided_layouts is not None else rules.get('layouts', [])
+        if provided_layouts is not None:
+            layouts = provided_layouts
+        else:
+            rules = pptx_service.get_stored_rules()
+            layouts = rules.get('layouts', [])
         
         if not layouts:
             return jsonify({'error': 'No layouts available'}), 400

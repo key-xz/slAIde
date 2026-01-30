@@ -29,6 +29,25 @@ class PPTXService:
             except Exception as e:
                 print(f"error cleaning up template: {e}")
     
+    def load_template_file(self, file_storage, layouts, slide_size):
+        """load a template file with pre-extracted layouts (used when loading from DB)"""
+        self.cleanup_template()
+        self.uploaded_images = {}
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as tmp:
+            file_storage.save(tmp.name)
+            self.template_path = tmp.name
+        
+        # store the provided rules without re-extracting
+        self.stored_rules = {
+            'layouts': layouts,
+            'slide_size': slide_size,
+            'theme_data': None,
+            'customTheme': None,
+        }
+        
+        print(f"\ntemplate loaded with {len(layouts)} layouts from database")
+    
     def extract_rules_from_file(self, file_storage):
         self.cleanup_template()
         self.uploaded_images = {}
@@ -47,7 +66,7 @@ class PPTXService:
             layouts = extraction_result['layouts']
             theme_data = extraction_result.get('theme_data')
             
-            print(f"\n✓ extracted {len(layouts)} rigid layout templates")
+            print(f"\nextracted {len(layouts)} rigid layout templates")
             
             # STRICT VALIDATION: Fail fast if critical design specs are missing
             self._validate_complete_extraction(prs, layouts, theme_data)

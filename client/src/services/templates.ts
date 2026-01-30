@@ -4,6 +4,19 @@ import type { StylingRules, Template, LayoutRow } from '../types'
 // re-export types for convenience
 export type { Template, LayoutRow }
 
+// download template file from storage
+export async function downloadTemplateFile(filePath: string): Promise<Blob> {
+  const { data, error } = await supabase.storage
+    .from('templates')
+    .download(filePath)
+  
+  if (error) {
+    throw new Error(`failed to download template file: ${error.message}`)
+  }
+  
+  return data
+}
+
 function toNumber(value: any): number {
   const n = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(n) ? n : 0
@@ -57,12 +70,32 @@ function sanitizeShapes(shapes: any): any[] | null {
 export async function saveTemplate(
   name: string,
   stylingRules: StylingRules,
-  description?: string
+  description?: string,
+  file?: File
 ): Promise<{ template: Template; layouts: LayoutRow[] }> {
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
     throw new Error('user must be authenticated to save templates')
+  }
+
+  // upload file to storage if provided
+  let filePath: string | null = null
+  if (file) {
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${user.id}/${Date.now()}.${fileExt}`
+    
+    const { error: uploadError } = await supabase.storage
+      .from('templates')
+      .upload(fileName, file, {
+        upsert: false,
+      })
+    
+    if (uploadError) {
+      throw new Error(`failed to upload template file: ${uploadError.message}`)
+    }
+    
+    filePath = fileName
   }
 
   // important: only store plain json fields (avoids cyclic refs from extraction output)
@@ -75,6 +108,7 @@ export async function saveTemplate(
     slide_size: slideSize,
     theme_data: null,
     custom_theme: null,
+    file_path: filePath,
   }
 
   // insert or update template
@@ -149,7 +183,9 @@ export async function getUserTemplates(): Promise<Template[]> {
 }
 
 // get a specific template with its layouts
-export async function getTemplate(templateId: string): Promise<StylingRules | null> {
+export async function getTemplate(
+  templateId: string
+): Promise<{ rules: StylingRules; template: Template } | null> {
   const { data: template, error: templateError } = await supabase
     .from('templates')
     .select('*')
@@ -189,7 +225,7 @@ export async function getTemplate(templateId: string): Promise<StylingRules | nu
     })),
   }
 
-  return stylingRules
+  return { rules: stylingRules, template: template as Template }
 }
 
 // delete a template (cascades to layouts)

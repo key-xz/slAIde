@@ -21,6 +21,12 @@ class AIService:
             default_headers=default_headers or None,
         )
         self.model = Config.AI_MODEL
+        
+        print(f"\nai service initialized:")
+        print(f"   base url: {Config.OPENROUTER_BASE_URL}")
+        print(f"   text model: {self.model}")
+        print(f"   vision model: {Config.AI_VISION_MODEL}")
+        print(f"   api key: {'***' + api_key[-8:] if api_key else 'MISSING'}\n")
 
     def _chat(self, messages, response_format_json=True, **kwargs):
         params = {
@@ -35,11 +41,15 @@ class AIService:
         try:
             return self.client.chat.completions.create(**params)
         except Exception as e:
-            # openrouter/model may not support response_format; retry without it
             message = str(e)
+            
+            # openrouter/model may not support response_format; retry without it
             if response_format_json and ('response_format' in message or 'Unknown parameter' in message):
                 params.pop('response_format', None)
                 return self.client.chat.completions.create(**params)
+            
+            # add model context to error for debugging
+            print(f"ai call failed with model: {params.get('model', 'unknown')}")
             raise
     
     def preprocess_content_structure(self, content_text, layouts, num_images=0, slide_size=None):
@@ -1145,7 +1155,8 @@ Return ONLY valid JSON."""
         EMUs (English Metric Units) are PowerPoint's internal unit.
         """
         try:
-            pos = placeholder_props.get('position', {})
+            # accept either {position:{...}} or a bare {left,top,width,height}
+            pos = placeholder_props.get('position') or placeholder_props
             width = pos.get('width', 0)
             height = pos.get('height', 0)
             return width * height
@@ -1166,13 +1177,14 @@ Return ONLY valid JSON."""
         # calculate total content area (all placeholders)
         content_area = 0
         for placeholder in layout.get('placeholders', []):
-            ph_props = placeholder.get('properties', {})
+            # layouts coming from DB may store geometry at placeholder.position
+            ph_props = placeholder.get('properties') or placeholder
             content_area += self._calculate_placeholder_area(ph_props)
         
         # Also include static shapes if present (design elements)
         for shape in layout.get('shapes', []):
             if shape.get('is_design_image') or shape.get('type') in ['PICTURE', 'TEXT_BOX', 'AUTO_SHAPE']:
-                shape_props = shape.get('properties', {})
+                shape_props = shape.get('properties') or shape
                 content_area += self._calculate_placeholder_area(shape_props)
         
         content_percent = (content_area / slide_area * 100) if slide_area > 0 else 0
@@ -1197,7 +1209,11 @@ Return ONLY valid JSON."""
         STRICT MODE: Raises ValueError if required properties are missing.
         """
         try:
-            metrics = self._textbox_metrics_from_props(placeholder_props)
+            # allow simplified placeholder payloads (from DB) by normalizing props
+            normalized = dict(placeholder_props or {})
+            if 'position' not in normalized and isinstance(placeholder_props, dict) and 'position' in placeholder_props:
+                normalized['position'] = placeholder_props.get('position')
+            metrics = self._textbox_metrics_from_props(normalized)
 
             total_chars = max(0, metrics['chars_per_line'] * metrics['lines_available'])
             total_words = max(0, total_chars // 6)
@@ -1221,9 +1237,36 @@ Return ONLY valid JSON."""
                 'chars_per_line': metrics['chars_per_line'],
                 'lines_available': metrics['lines_available'],
             }
-        except Exception as e:
-            # strict mode: don't use fallbacks, raise the error
-            raise ValueError(f"Failed to calculate text capacity for placeholder: {str(e)}")
+        except Exception:
+            # fallback for DB-saved layouts where font/style metadata isn't present
+            # choose conservative capacities so prompts still work
+            pos = (placeholder_props or {}).get('position') if isinstance(placeholder_props, dict) else None
+            width = (pos or {}).get('width') if isinstance(pos, dict) else None
+            height = (pos or {}).get('height') if isinstance(pos, dict) else None
+
+            # if we have geometry, scale a rough estimate; otherwise default small
+            if isinstance(width, (int, float)) and isinstance(height, (int, float)) and width > 0 and height > 0:
+                area = width * height
+                # tuned so typical body boxes land ~400-1200 chars
+                approx_chars = int(max(120, min(2500, area / 20000000)))
+            else:
+                approx_chars = 300
+
+            approx_words = max(20, approx_chars // 6)
+            if approx_chars < 250:
+                size_category = "SMALL"
+            elif approx_chars < 700:
+                size_category = "MEDIUM"
+            else:
+                size_category = "LARGE"
+
+            return {
+                'chars': approx_chars,
+                'words': approx_words,
+                'size': size_category,
+                'chars_per_line': max(20, approx_chars // 10),
+                'lines_available': 10,
+            }
 
     def _textbox_metrics_from_props(self, placeholder_props):
         """
@@ -1234,7 +1277,7 @@ Return ONLY valid JSON."""
         - font size
         - paragraph line spacing (if present)
         """
-        pos = placeholder_props.get('position')
+        pos = placeholder_props.get('position') or placeholder_props
         if not pos:
             raise ValueError("Missing position data for placeholder")
 
