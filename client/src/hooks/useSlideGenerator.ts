@@ -20,6 +20,9 @@ export function useSlideGenerator() {
   const [preprocessing, setPreprocessing] = useState(false)
   const [imageStore, setImageStore] = useState<TaggedImage[]>([])
   const [regeneratingSlideId, setRegeneratingSlideId] = useState<string | null>(null)
+  const [overflowInfo, setOverflowInfo] = useState<{ count: number; details: any[] } | null>(null)
+  const [aiModel, setAiModel] = useState<'openai' | 'kimi'>('kimi')
+  const [abortController, setAbortController] = useState<AbortController | null>(null)
 
   // load user's templates when authenticated
   useEffect(() => {
@@ -66,13 +69,13 @@ export function useSlideGenerator() {
           try {
             const fileBlob = await templateApi.downloadTemplateFile(template.file_path)
             const file = new File([fileBlob], template.name + '.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
-            
-            // send file to backend to set up pptx_service
             await api.loadTemplateFile(file, stylingRules.layouts, stylingRules.slide_size)
           } catch (fileErr) {
-            console.warn('failed to load template file, deck download may not work:', fileErr)
-            // don't fail the whole operation - user can still preview slides
+            console.error('failed to load template file:', fileErr)
+            setError('warning: template file not available. you can preview slides but downloads will fail. please re-upload this template to fix.')
           }
+        } else {
+          setError('warning: this template was created before file storage was enabled. you can preview slides but downloads will fail. please re-upload this template to enable downloads.')
         }
       }
     } catch (err) {
@@ -147,6 +150,9 @@ export function useSlideGenerator() {
     setError(null)
     setImageStore(content.images)
 
+    const controller = new AbortController()
+    setAbortController(controller)
+
     try {
       // if ai has already generated structure (intelligent chunking), use it directly
       if (content.aiGeneratedStructure) {
@@ -157,14 +163,28 @@ export function useSlideGenerator() {
           content.chunks,
           content.images,
           rules?.layouts || [],
-          rules?.slide_size
+          rules?.slide_size,
+          aiModel,
+          controller.signal
         )
         setContentStructure(data.structure)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'an error occurred')
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('generation cancelled')
+      } else {
+        setError(err instanceof Error ? err.message : 'an error occurred')
+      }
     } finally {
       setPreprocessing(false)
+      setAbortController(null)
+    }
+  }
+  
+  const handleCancelGeneration = () => {
+    if (abortController) {
+      abortController.abort()
+      setAbortController(null)
     }
   }
 
@@ -252,12 +272,31 @@ export function useSlideGenerator() {
     }
   }
 
-  const handleGenerateDeck = async (slidesToGenerate: SlideSpec[]) => {
+  const handleGenerateDeck = async (slidesToGenerate: SlideSpec[], applyCompression = false, allowOverflow = false) => {
     setGenerating(true)
     setError(null)
-    setGeneratedFile(null)
+    if (!applyCompression && !allowOverflow) {
+      setGeneratedFile(null)
+      setOverflowInfo(null)
+    }
 
     try {
+      // ensure template file is loaded on backend before generating
+      if (currentTemplateId && user) {
+        const currentTemplate = templates.find(t => t.id === currentTemplateId)
+        if (currentTemplate?.file_path && rules) {
+          try {
+            const fileBlob = await templateApi.downloadTemplateFile(currentTemplate.file_path)
+            const file = new File([fileBlob], currentTemplate.name + '.pptx', { 
+              type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' 
+            })
+            await api.loadTemplateFile(file, rules.layouts, rules.slide_size)
+          } catch (fileErr) {
+            console.error('failed to reload template file:', fileErr)
+          }
+        }
+      }
+
       const slidesForAPI = slidesToGenerate.map(slide => ({
         layout_name: slide.layout_name,
         placeholders: slide.placeholders.map(ph => ({
@@ -272,12 +311,26 @@ export function useSlideGenerator() {
         imageStore, 
         rules?.customTheme,
         rules?.layouts,
-        rules?.slide_size
+        rules?.slide_size,
+        applyCompression,
+        allowOverflow
       )
-      setGeneratedFile(data.file)
-      console.log(`generated ${data.slides_count} slides successfully`)
+      
+      if (data.overflow_detected) {
+        // overflow detected - show options to user
+        setOverflowInfo({
+          count: data.overflow_count || 0,
+          details: data.overflow_details || []
+        })
+        setError(null)
+      } else if (data.file) {
+        // success
+        setGeneratedFile(data.file)
+        setOverflowInfo(null)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'an error occurred')
+      setOverflowInfo(null)
     } finally {
       setGenerating(false)
     }
@@ -411,12 +464,16 @@ export function useSlideGenerator() {
     regeneratingSlideId,
     templates,
     currentTemplateId,
+    overflowInfo,
+    aiModel,
+    setAiModel,
     handleFileChange,
     handleUpload,
     handlePreprocessContent,
     handleGenerateFromStructure,
     handleGeneratePreview,
     handleGenerateDeck,
+    handleCancelGeneration,
     handleDeleteLayout,
     handleDeleteLayoutFromCollection,
     handleDeleteTemplate,

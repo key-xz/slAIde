@@ -17,7 +17,7 @@ def clone_slide_with_content(source_presentation, source_slide_index, target_pre
         source_slide = source_presentation.slides[source_slide_index]
         source_layout = source_slide.slide_layout
         
-        print(f"    🔄 cloning slide {source_slide_index + 1} (layout: {source_layout.name})")
+        print(f"    cloning slide {source_slide_index + 1} (layout: {source_layout.name})")
         
         # Add a new slide with the same layout
         new_slide = target_presentation.slides.add_slide(source_layout)
@@ -32,11 +32,11 @@ def clone_slide_with_content(source_presentation, source_slide_index, target_pre
         # Validate shape positions are within slide bounds
         _validate_shape_positions(new_slide, target_presentation)
         
-        print(f"    ✅ cloned slide successfully")
+        print(f"    cloned slide successfully")
         return new_slide
         
     except Exception as e:
-        print(f"    ❌ error cloning slide: {e}")
+        print(f"    error cloning slide: {e}")
         import traceback
         traceback.print_exc()
         raise
@@ -90,7 +90,7 @@ def _fill_placeholder_in_cloned_slide(target_slide, source_shape, content_item, 
         pass
     
     if not target_placeholder:
-        print(f"        ⚠️  could not find target placeholder for idx {idx}")
+        print(f"        could not find target placeholder for idx {idx}")
         return
     
     try:
@@ -161,7 +161,7 @@ def _fill_placeholder_in_cloned_slide(target_slide, source_shape, content_item, 
                     print(f"        ✓ filled image placeholder {idx}: {filename} (overriding template image)")
     
     except Exception as e:
-        print(f"        ❌ error filling placeholder {idx}: {e}")
+        print(f"        error filling placeholder {idx}: {e}")
         import traceback
         traceback.print_exc()
 
@@ -201,35 +201,35 @@ def _validate_shape_positions(slide, presentation):
             # check and fix bounds
             if left < 0:
                 shape.left = 0
-                print(f"        ⚠️  adjusted shape left position: {left} → 0")
+                print(f"        adjusted shape left position: {left} -> 0")
             
             if top < 0:
                 shape.top = 0
-                print(f"        ⚠️  adjusted shape top position: {top} → 0")
+                print(f"        adjusted shape top position: {top} -> 0")
             
             if right > slide_width:
                 if width < slide_width:
                     new_left = slide_width - width
                     shape.left = new_left
-                    print(f"        ⚠️  adjusted shape to fit within right edge: left {left} → {new_left}")
+                    print(f"        adjusted shape to fit within right edge: left {left} -> {new_left}")
                 else:
                     # shape too wide - shrink it
                     new_width = slide_width - 100000
                     shape.width = new_width
                     shape.left = 50000
-                    print(f"        ⚠️  resized shape (too wide): width {width} → {new_width}")
+                    print(f"        resized shape (too wide): width {width} -> {new_width}")
             
             if bottom > slide_height:
                 if height < slide_height:
                     new_top = slide_height - height
                     shape.top = new_top
-                    print(f"        ⚠️  adjusted shape to fit within bottom edge: top {top} → {new_top}")
+                    print(f"        adjusted shape to fit within bottom edge: top {top} -> {new_top}")
                 else:
                     # shape too tall - shrink it
                     new_height = slide_height - 100000
                     shape.height = new_height
                     shape.top = 50000
-                    print(f"        ⚠️  resized shape (too tall): height {height} → {new_height}")
+                    print(f"        resized shape (too tall): height {height} -> {new_height}")
         
         except Exception as e:
             print(f"        warning: could not validate shape position: {e}")

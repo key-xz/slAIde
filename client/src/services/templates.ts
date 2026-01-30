@@ -136,11 +136,11 @@ export async function saveTemplate(
   }
 
   // insert new layouts (sanitize to plain json)
-  const layoutsToInsert = stylingRules.layouts.map((layout) => ({
+  const layoutsToInsert = stylingRules.layouts.map((layout, index) => ({
     template_id: template.id,
     name: toStringSafe(layout?.name),
     master_name: toStringSafe((layout as any)?.master_name),
-    layout_idx: toNumber((layout as any)?.layout_idx),
+    layout_idx: toNumber((layout as any)?.layout_index ?? (layout as any)?.layout_idx ?? index),
     placeholders: sanitizePlaceholders((layout as any)?.placeholders),
     shapes: sanitizeShapes((layout as any)?.shapes),
     category: toStringSafe((layout as any)?.category) || null,
@@ -216,7 +216,9 @@ export async function getTemplate(
     layouts: (layouts || []).map(layout => ({
       name: layout.name,
       master_name: layout.master_name,
+      layout_index: layout.layout_idx,  // map layout_idx back to layout_index for backend
       layout_idx: layout.layout_idx,
+      slide_number: layout.layout_idx + 1,  // 1-based for display
       placeholders: layout.placeholders,
       shapes: layout.shapes,
       category: layout.category,

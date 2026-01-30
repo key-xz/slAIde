@@ -15,18 +15,39 @@ class AIService:
         if Config.OPENROUTER_APP_NAME:
             default_headers['X-Title'] = Config.OPENROUTER_APP_NAME
 
-        self.client = OpenAI(
+        self.openrouter_client = OpenAI(
             api_key=api_key,
             base_url=Config.OPENROUTER_BASE_URL,
             default_headers=default_headers or None,
+            timeout=180.0  # 3 minute timeout for kimi
         )
-        self.model = Config.AI_MODEL
         
-        print(f"\nai service initialized:")
-        print(f"   base url: {Config.OPENROUTER_BASE_URL}")
-        print(f"   text model: {self.model}")
-        print(f"   vision model: {Config.AI_VISION_MODEL}")
-        print(f"   api key: {'***' + api_key[-8:] if api_key else 'MISSING'}\n")
+        # also initialize openai client if key is available
+        self.openai_client = None
+        if Config.OPENAI_API_KEY:
+            self.openai_client = OpenAI(
+                api_key=Config.OPENAI_API_KEY,
+                timeout=120.0  # 2 minute timeout for openai
+            )
+        
+        self.model = Config.AI_MODEL
+        self.current_provider = 'openrouter'  # or 'openai'
+        self.client = self.openrouter_client
+
+    def set_model(self, model_name: str):
+        """switch between openai and kimi models"""
+        if model_name == 'openai':
+            if not self.openai_client:
+                raise ValueError('OpenAI API key not configured')
+            self.client = self.openai_client
+            self.model = 'gpt-4o-mini'
+            self.current_provider = 'openai'
+            print(f"switched to OpenAI (gpt-4o-mini)")
+        else:  # kimi or default
+            self.client = self.openrouter_client
+            self.model = 'moonshotai/kimi-k2.5'
+            self.current_provider = 'openrouter'
+            print(f"switched to Kimi (moonshotai/kimi-k2.5)")
 
     def _chat(self, messages, response_format_json=True, **kwargs):
         params = {
@@ -43,13 +64,15 @@ class AIService:
         except Exception as e:
             message = str(e)
             
+            # check for timeout
+            if 'timeout' in message.lower() or 'timed out' in message.lower():
+                raise Exception(f"AI request timed out after {self.client.timeout}s using {self.current_provider}. Try using OpenAI instead or simplifying your content.")
+            
             # openrouter/model may not support response_format; retry without it
             if response_format_json and ('response_format' in message or 'Unknown parameter' in message):
                 params.pop('response_format', None)
                 return self.client.chat.completions.create(**params)
             
-            # add model context to error for debugging
-            print(f"ai call failed with model: {params.get('model', 'unknown')}")
             raise
     
     def preprocess_content_structure(self, content_text, layouts, num_images=0, slide_size=None):
@@ -222,7 +245,7 @@ Return ONLY valid JSON."""
         ai-driven intelligent chunking: analyzes raw text + images + layouts together
         to create slide-ready chunks where each chunk already knows its layout and content pairing.
         """
-        print(f"\nAI INTELLIGENT CHUNKING")
+        print(f"\nAI INTELLIGENT CHUNKING (using {self.current_provider})")
         print(f"   raw text: {len(raw_text)} chars")
         print(f"   images: {len(images)}")
         print(f"   layouts: {len(layouts)}")
@@ -237,6 +260,9 @@ Return ONLY valid JSON."""
         layout_descriptions = self._format_layouts_with_categories(layouts, layouts_by_category, layout_display_names, slide_size)
         
         image_descriptions = self._format_images_with_vision(images)
+        
+        print(f"   layout descriptions: {len(layout_descriptions)} chars")
+        print(f"   image descriptions: {len(image_descriptions)} chars")
         
         system_prompt = f"""You are an expert presentation designer. Create slides with OPTIMAL AESTHETIC BALANCE.
 
@@ -3037,31 +3063,26 @@ Return ONLY valid JSON."""
     def _format_layouts_for_prompt(self, layouts):
         descriptions = []
         
-        # create display names with warnings for misleading layouts
-        display_names = {}
-        for layout in layouts:
-            text_phs = [p for p in layout['placeholders'] if p['type'] == 'text']
-            img_phs = [p for p in layout['placeholders'] if p['type'] == 'image']
-            
-            has_image_in_name = any(word in layout['name'].lower() for word in ['picture', 'image', 'photo'])
-            has_no_image_placeholder = len(img_phs) == 0
-            
-            if has_image_in_name and has_no_image_placeholder:
-                display_names[layout['name']] = f"{layout['name']} [TEXT-ONLY: {len(text_phs)}T+0I]"
-            else:
-                display_names[layout['name']] = layout['name']
-        
         descriptions.append("\n" + "="*80)
         descriptions.append("VALID LAYOUT NAMES (use these EXACT names in layout_name field):")
         descriptions.append("="*80)
-        all_layout_names = [f'"{display_names[layout["name"]]}"' for layout in layouts]
+        all_layout_names = [f'"{layout["name"]}"' for layout in layouts]
         descriptions.append(", ".join(all_layout_names))
         descriptions.append("="*80)
         
         for i, layout in enumerate(layouts):
-            display_name = display_names[layout['name']]
+            # check for misleading names
+            text_phs = [p for p in layout['placeholders'] if p['type'] == 'text']
+            img_phs = [p for p in layout['placeholders'] if p['type'] == 'image']
+            has_image_in_name = any(word in layout['name'].lower() for word in ['picture', 'image', 'photo'])
+            has_no_image_placeholder = len(img_phs) == 0
+            
             desc = f"\n{'='*60}"
-            desc += f"\nLayout {i+1}: \"{display_name}\""
+            desc += f"\nLayout {i+1}: \"{layout['name']}\""
+            
+            # add warning as note, not in the name itself
+            if has_image_in_name and has_no_image_placeholder:
+                desc += f"\n!! WARNING: Name mentions image but layout has NO image placeholders ({len(text_phs)} text only)"
             if 'original_layout_name' in layout:
                 desc += f" (based on: {layout['original_layout_name']})"
             desc += f"\n{'='*60}"
@@ -3146,3 +3167,150 @@ Return ONLY valid JSON."""
         desc_text += f"\n{'='*60}"
         
         return desc_text
+    
+    def compress_overflowing_content(self, slide_specs, overflow_details, compression_ratio=0.70):
+        """
+        compress content in slides that overflow their text boxes.
+        uses AI to intelligently reduce content while preserving key information.
+        
+        compression_ratio: target length as fraction of current (0.70 = reduce by 30%)
+        """
+        
+        # group overflows by slide
+        slides_to_fix = {}
+        for overflow in overflow_details:
+            slide_idx = overflow['slide_idx']
+            if slide_idx not in slides_to_fix:
+                slides_to_fix[slide_idx] = []
+            slides_to_fix[slide_idx].append(overflow)
+        
+        # create compressed slide specs
+        compressed_specs = []
+        for i, spec in enumerate(slide_specs):
+            if i in slides_to_fix:
+                # this slide has overflows, compress it
+                overflows = slides_to_fix[i]
+                compressed_spec = self._compress_slide_content(spec, overflows, compression_ratio)
+                compressed_specs.append(compressed_spec)
+            else:
+                # no overflow, keep as is
+                compressed_specs.append(spec)
+        
+        return compressed_specs
+    
+    def _compress_slide_content(self, slide_spec, overflows, compression_ratio):
+        """compress content in specific placeholders that overflow"""
+        # build a map of which placeholder indices need compression
+        overflow_map = {}
+        for ovf in overflows:
+            # try to match overflow to placeholder by content
+            current_text = ovf['current_text']
+            for ph in slide_spec['placeholders']:
+                if ph.get('type') == 'text' and ph.get('content') == current_text:
+                    target_length = max(50, int(ovf['char_count'] * compression_ratio))  # min 50 chars
+                    overflow_map[ph['idx']] = {
+                        'current_length': ovf['char_count'],
+                        'target_length': target_length,
+                        'current_content': current_text,
+                    }
+                    break
+        
+        if not overflow_map:
+            return slide_spec
+        
+        # build compression prompt
+        compression_tasks = []
+        for idx, info in overflow_map.items():
+            compression_tasks.append({
+                'placeholder_idx': idx,
+                'current_length': info['current_length'],
+                'target_length': info['target_length'],
+                'content': info['current_content'],
+            })
+        
+        system_prompt = """you are a content compression expert. your task is to aggressively reduce text length to fit strict character limits while preserving the core message.
+
+CRITICAL RULES:
+- the compressed text MUST be under the target character limit (count every character including spaces)
+- if needed, reduce to only the most essential points
+- use extremely concise language
+- remove redundant words and filler
+- maintain bullet point structure if present
+- be aggressive - fitting the limit is mandatory, even if it means significant reduction
+- preserve clarity and grammar despite the compression"""
+
+        user_prompt = f"""compress the following text content to fit within the specified character limits:
+
+layout: {slide_spec['layout_name']}
+
+compression tasks:
+"""
+        for task in compression_tasks:
+            user_prompt += f"\n{'='*60}\n"
+            user_prompt += f"placeholder index: {task['placeholder_idx']}\n"
+            user_prompt += f"current length: {task['current_length']} characters\n"
+            user_prompt += f"target length: {task['target_length']} characters (MUST NOT EXCEED)\n"
+            user_prompt += f"current content:\n{task['content']}\n"
+        
+        user_prompt += f"\n{'='*60}\n"
+        user_prompt += """\nreturn a JSON object with this structure:
+{
+  "compressed": [
+    {
+      "placeholder_idx": <number>,
+      "content": "<compressed text that fits target length>",
+      "actual_length": <character count>
+    }
+  ]
+}"""
+        
+        try:
+            response = self._chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format_json=True,
+                temperature=0.3,
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            # apply compressed content to slide spec
+            compressed_slide = dict(slide_spec)
+            compressed_placeholders = []
+            
+            compression_map = {item['placeholder_idx']: item['content'] for item in result['compressed']}
+            
+            for ph in slide_spec['placeholders']:
+                new_ph = dict(ph)
+                if ph['idx'] in compression_map:
+                    new_ph['content'] = compression_map[ph['idx']]
+                compressed_placeholders.append(new_ph)
+            
+            compressed_slide['placeholders'] = compressed_placeholders
+            return compressed_slide
+            
+        except Exception as e:
+            # fallback: smart truncation at word boundaries
+            compressed_slide = dict(slide_spec)
+            compressed_placeholders = []
+            
+            for ph in slide_spec['placeholders']:
+                new_ph = dict(ph)
+                if ph['idx'] in overflow_map:
+                    target = overflow_map[ph['idx']]['target_length']
+                    content = ph.get('content', '')
+                    
+                    if len(content) > target:
+                        # truncate at word boundary
+                        truncated = content[:target - 3]  # leave room for ellipsis
+                        last_space = truncated.rfind(' ')
+                        if last_space > target * 0.8:  # if space is reasonably close to end
+                            truncated = truncated[:last_space]
+                        new_ph['content'] = truncated + '...'
+                
+                compressed_placeholders.append(new_ph)
+            
+            compressed_slide['placeholders'] = compressed_placeholders
+            return compressed_slide

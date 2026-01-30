@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services import PPTXService, AIService
+from services.pptx_service import TextOverflowException
 from utils.layout_validator import validate_content_feasibility, get_feasibility_summary
 
 api_blueprint = Blueprint('api', __name__, url_prefix='/api')
@@ -65,12 +66,12 @@ def load_template():
         layouts = json.loads(layouts_json)
         slide_size = json.loads(slide_size_json)
         
-        # store the file in pptx_service without extracting
         pptx_service.load_template_file(file, layouts, slide_size)
-        
         return jsonify({'success': True, 'message': 'Template loaded successfully'})
     
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -140,6 +141,7 @@ def intelligent_chunk():
         images = request_data.get('images', [])
         provided_layouts = request_data.get('layouts', None)
         provided_slide_size = request_data.get('slide_size', None)
+        ai_model = request_data.get('ai_model', 'kimi')
         
         if not raw_text or not raw_text.strip():
             return jsonify({'error': 'Raw text is required'}), 400
@@ -156,7 +158,9 @@ def intelligent_chunk():
         if not layouts:
             return jsonify({'error': 'No layouts available. Please upload a template first.'}), 400
         
-        result = get_ai_service().intelligent_chunk_with_layouts(
+        ai_service = get_ai_service()
+        ai_service.set_model(ai_model)
+        result = ai_service.intelligent_chunk_with_layouts(
             raw_text=raw_text,
             images=images,
             layouts=layouts,
@@ -376,6 +380,8 @@ def generate_deck():
         custom_theme = request_data.get('customTheme', None)
         provided_layouts = request_data.get('layouts')
         provided_slide_size = request_data.get('slide_size')
+        apply_compression = request_data.get('apply_compression', False)
+        allow_overflow = request_data.get('allow_overflow', False)
         
         if not content_text and not slides_spec:
             return jsonify({'error': 'Either content_text or slides specification is required'}), 400
@@ -470,14 +476,70 @@ def generate_deck():
                 slides_specification=[]
             )
         
-        file_b64 = pptx_service.generate_deck(slide_specs, custom_theme=custom_theme)
+        # attempt generation
+        try:
+            file_b64 = pptx_service.generate_deck(slide_specs, custom_theme=custom_theme, allow_overflow=allow_overflow)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Generated {len(slide_specs)} slides successfully',
+                'file': file_b64,
+                'slides_count': len(slide_specs)
+            })
         
-        return jsonify({
-            'success': True,
-            'message': f'Generated {len(slide_specs)} slides successfully',
-            'file': file_b64,
-            'slides_count': len(slide_specs)
-        })
+        except TextOverflowException as overflow_err:
+            # overflow detected
+            if apply_compression:
+                # user requested compression - do iterative compression
+                print(f"\nuser requested compression, starting iterative process...")
+                
+                max_iterations = 5
+                compression_ratios = [0.75, 0.65, 0.55, 0.45, 0.35]
+                
+                for iteration in range(max_iterations):
+                    compression_ratio = compression_ratios[iteration]
+                    print(f"\ncompression iteration {iteration + 1}/{max_iterations} (target: {compression_ratio:.0%})...")
+                    
+                    slide_specs = get_ai_service().compress_overflowing_content(
+                        slide_specs,
+                        overflow_err.overflow_details,
+                        compression_ratio=compression_ratio
+                    )
+                    
+                    try:
+                        file_b64 = pptx_service.generate_deck(slide_specs, custom_theme=custom_theme, allow_overflow=False)
+                        
+                        return jsonify({
+                            'success': True,
+                            'message': f'Generated {len(slide_specs)} slides successfully after {iteration + 1} compression iteration{"s" if iteration > 0 else ""}',
+                            'file': file_b64,
+                            'slides_count': len(slide_specs),
+                            'compression_iterations': iteration + 1
+                        })
+                    
+                    except TextOverflowException as retry_err:
+                        if iteration < max_iterations - 1:
+                            # continue to next iteration
+                            overflow_err = retry_err
+                            continue
+                        else:
+                            # exhausted all attempts
+                            return jsonify({
+                                'error': f'Content too long after {max_iterations} compression attempts. {retry_err.violation_count} text boxes still overflow.',
+                                'overflow_count': retry_err.violation_count
+                            }), 400
+            else:
+                # user hasn't chosen - return overflow info so they can decide
+                return jsonify({
+                    'overflow_detected': True,
+                    'overflow_count': overflow_err.violation_count,
+                    'overflow_details': [{
+                        'slide_num': ovf['slide_num'],
+                        'shape_name': ovf['shape_name'],
+                        'char_count': ovf['char_count']
+                    } for ovf in overflow_err.overflow_details],
+                    'message': f'{overflow_err.violation_count} text boxes overflow their bounds. You can download as-is or apply compression.'
+                }), 200
     
     except ValueError as e:
         return jsonify({'error': str(e)}), 400

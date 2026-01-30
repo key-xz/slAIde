@@ -174,9 +174,6 @@ export function BulkContentUpload({ onPreprocess, preprocessing, layouts, slideS
               }
             : i
         ))
-        
-        console.log(`analyzed ${img.filename}: ${analysis.visionDescription || 'no description'}`)
-        
       } catch (err) {
         console.error(`failed to analyze ${img.filename}:`, err)
       }

@@ -19,12 +19,13 @@ export class ApiError extends Error {
 
 async function fetchApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit,
+  signal?: AbortSignal
 ): Promise<T> {
   const url = `${config.apiBaseUrl}${endpoint}`
   
   try {
-    const response = await fetch(url, options)
+    const response = await fetch(url, { ...options, signal })
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
@@ -142,8 +143,18 @@ export async function generateDeckFromSlides(
   images: Array<{ filename: string; data: string }>,
   customTheme?: any,
   layouts?: any[],
-  slideSize?: { width: number; height: number }
-): Promise<{ success: boolean; message: string; file: string; slides_count: number }> {
+  slideSize?: { width: number; height: number },
+  applyCompression?: boolean,
+  allowOverflow?: boolean
+): Promise<{ 
+  success?: boolean; 
+  message: string; 
+  file?: string; 
+  slides_count?: number;
+  overflow_detected?: boolean;
+  overflow_count?: number;
+  overflow_details?: any[];
+}> {
   return fetchApi(API_ENDPOINTS.generateDeck, {
     method: 'POST',
     headers: {
@@ -156,6 +167,8 @@ export async function generateDeckFromSlides(
       customTheme,
       layouts,
       slide_size: slideSize,
+      apply_compression: applyCompression,
+      allow_overflow: allowOverflow,
     }),
   })
 }
@@ -191,7 +204,9 @@ export async function preprocessContentWithLinks(
   chunks: TextChunk[],
   images: TaggedImage[],
   layouts: any[],
-  slideSize?: { width: number; height: number }
+  slideSize?: { width: number; height: number },
+  aiModel?: string,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; structure: any }> {
   return fetchApi('/api/preprocess-content', {
     method: 'POST',
@@ -212,8 +227,9 @@ export async function preprocessContentWithLinks(
       })),
       layouts,
       slide_size: slideSize,
+      ...(aiModel && { ai_model: aiModel }),
     }),
-  })
+  }, signal)
 }
 
 export async function generateSlidePreviewWithLinks(

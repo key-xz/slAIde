@@ -32,6 +32,9 @@ function App() {
     regeneratingSlideId,
     templates,
     currentTemplateId,
+    overflowInfo,
+    aiModel,
+    setAiModel,
     handleFileChange,
     handleUpload,
     handlePreprocessContent,
@@ -41,6 +44,7 @@ function App() {
     handleDeleteLayoutFromCollection,
     handleDeleteTemplate,
     handleRegenerateSlide,
+    handleCancelGeneration,
     loadTemplate,
     loadTemplates,
     setSlides,
@@ -96,7 +100,7 @@ function App() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-8">
-        {activeTab === 'assets' && (
+        <div className={activeTab === 'assets' ? '' : 'hidden'}>
           <div className="max-w-6xl mx-auto">
             {user && templates.length > 0 && (
               <TemplateSelector
@@ -120,9 +124,9 @@ function App() {
             {error && <ErrorDisplay error={error} />}
             {rules && <LayoutManager rules={rules} onDeleteLayout={handleDeleteLayout} />}
           </div>
-        )}
+        </div>
 
-        {activeTab === 'collection' && (
+        <div className={activeTab === 'collection' ? '' : 'hidden'}>
           <div className="max-w-7xl mx-auto">
             {user ? (
               <LayoutCollectionView
@@ -135,9 +139,9 @@ function App() {
               </div>
             )}
           </div>
-        )}
+        </div>
 
-        {activeTab === 'generate' && (
+        <div className={activeTab === 'generate' ? '' : 'hidden'}>
           <div className="max-w-6xl mx-auto">
             {user && templates.length > 0 && (
               <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
@@ -174,6 +178,46 @@ function App() {
                   >
                     upload more templates
                   </button>
+                </div>
+              </div>
+            )}
+
+            {rules && (
+              <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs font-semibold text-gray-600">AI model:</div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setAiModel('kimi')}
+                        className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                          aiModel === 'kimi'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        kimi k2.5
+                      </button>
+                      <button
+                        onClick={() => setAiModel('openai')}
+                        className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                          aiModel === 'openai'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        openai gpt-4o-mini
+                      </button>
+                    </div>
+                  </div>
+                  {(preprocessing || generating) && (
+                    <button
+                      onClick={handleCancelGeneration}
+                      className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                      cancel generation
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -229,11 +273,20 @@ function App() {
                   />
                 )}
 
-                {generatedFile && <DownloadSection generatedFile={generatedFile} />}
+                {(generatedFile || overflowInfo) && (
+                  <DownloadSection 
+                    generatedFile={generatedFile} 
+                    overflowInfo={overflowInfo}
+                    slides={slides}
+                    generating={generating}
+                    onGenerateWithCompression={() => handleGenerateDeck(slides, true, false)}
+                    onGenerateWithOverflow={() => handleGenerateDeck(slides, false, true)}
+                  />
+                )}
               </>
             )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

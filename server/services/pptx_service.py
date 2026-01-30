@@ -14,6 +14,15 @@ from utils.style_extractor import (
 from utils.slide_layout_extractor import extract_all_slides_as_layouts
 
 
+class TextOverflowException(Exception):
+    """exception raised when text boxes overflow after generation"""
+    def __init__(self, violation_count, overflow_details, slide_specs):
+        self.violation_count = violation_count
+        self.overflow_details = overflow_details
+        self.slide_specs = slide_specs
+        super().__init__(f"{violation_count} text boxes still overflow after enforcement")
+
+
 class PPTXService:
     def __init__(self):
         self.stored_rules = None
@@ -38,6 +47,10 @@ class PPTXService:
             file_storage.save(tmp.name)
             self.template_path = tmp.name
         
+        # verify the file was saved correctly
+        if not os.path.exists(self.template_path):
+            raise ValueError(f'failed to save template file to {self.template_path}')
+        
         # store the provided rules without re-extracting
         self.stored_rules = {
             'layouts': layouts,
@@ -45,8 +58,6 @@ class PPTXService:
             'theme_data': None,
             'customTheme': None,
         }
-        
-        print(f"\ntemplate loaded with {len(layouts)} layouts from database")
     
     def extract_rules_from_file(self, file_storage):
         self.cleanup_template()
@@ -65,8 +76,6 @@ class PPTXService:
             extraction_result = extract_all_slides_as_layouts(prs, self.template_path)
             layouts = extraction_result['layouts']
             theme_data = extraction_result.get('theme_data')
-            
-            print(f"\nextracted {len(layouts)} rigid layout templates")
             
             # STRICT VALIDATION: Fail fast if critical design specs are missing
             self._validate_complete_extraction(prs, layouts, theme_data)
@@ -281,15 +290,20 @@ class PPTXService:
     def _validate_and_fix_shape_positions(self, presentation):
         """
         validate that all shapes are positioned within slide bounds.
-        fix any shapes that extend beyond the slide edges.
-        uses deterministic python-pptx calculations.
+        DO NOT modify positions - shape modifications can corrupt the PowerPoint file.
+        """
+        # DISABLED: Shape position modifications can cause PowerPoint corruption
+        # The template's shapes should already be valid
+        pass
+    
+    def _old_validate_and_fix_shape_positions(self, presentation):
+        """
+        OLD VERSION: validate that all shapes are positioned within slide bounds.
+        DISABLED because aggressive shape fixing causes PowerPoint file corruption.
         """
         # get slide dimensions (in EMUs)
-        # standard 16:9 slide: 10" × 5.625" = 9144000 × 5143500 EMUs
         slide_width = presentation.slide_width
         slide_height = presentation.slide_height
-        
-        print(f"  slide dimensions: {slide_width / 914400:.2f}\" × {slide_height / 914400:.2f}\" ({slide_width} × {slide_height} EMUs)")
         
         issues_found = 0
         issues_fixed = 0
@@ -315,12 +329,12 @@ class PPTXService:
                     
                     if left < 0:
                         out_of_bounds = True
-                        adjustments.append(f"left {left} → 0")
+                        adjustments.append(f"left {left} -> 0")
                         shape.left = 0
                     
                     if top < 0:
                         out_of_bounds = True
-                        adjustments.append(f"top {top} → 0")
+                        adjustments.append(f"top {top} -> 0")
                         shape.top = 0
                     
                     if right > slide_width:
@@ -367,101 +381,12 @@ class PPTXService:
     
     def _enforce_text_fit_by_measurement(self, presentation):
         """
-        FINAL SAFETY NET: Use actual text frame measurements to detect overflow.
-        Every text box MUST fit within its template boundaries.
-        
-        NOTE: This is a last-resort enforcement. The AI service should have already:
-        1. Generated content within capacity limits
-        2. Created continuation slides for overflow content
-        3. Used bullet points without markers
-        
-        If this enforcement truncates text, it means the AI's capacity estimation was off.
-        The logs will show exactly what was truncated.
+        SAFETY NET: Check for text overflow but DO NOT truncate.
+        Truncation destroys content - we should compress or reject instead.
         """
-        total_shortened = 0
-        total_checked = 0
-        overflow_reports = []
-        
-        print(f"  FINAL SAFETY NET: checking all text boxes for overflow...")
-        
-        for slide_num, slide in enumerate(presentation.slides, 1):
-            slide_shortened = 0
-            
-            for shape in slide.shapes:
-                try:
-                    # Only process text frames
-                    if not hasattr(shape, 'text_frame'):
-                        continue
-                    
-                    text_frame = shape.text_frame
-                    if not text_frame.text.strip():
-                        continue
-                    
-                    total_checked += 1
-                    
-                    # Get original text
-                    original_text = text_frame.text
-                    original_len = len(original_text)
-                    
-                    # Get box metrics for debugging
-                    box_info = self._get_box_info(shape, text_frame)
-                    shape_name = getattr(shape, 'name', 'Unknown')
-                    
-                    # CRITICAL: Detect if text overflows template boundaries
-                    needs_shortening = self._detect_text_overflow(shape, text_frame)
-                    
-                    if needs_shortening:
-                        print(f"    ⚠️  slide {slide_num} '{shape_name}': OVERFLOW DETECTED")
-                        print(f"        text: {original_len} chars, '{original_text[:60]}...'")
-                        print(f"        box: {box_info}")
-                        
-                        # Iteratively shorten until it PHYSICALLY fits
-                        fitted_text = self._iteratively_fit_text(shape, text_frame, original_text)
-                        
-                        if fitted_text != original_text:
-                            total_shortened += 1
-                            slide_shortened += 1
-                            overflow_content = original_text[len(fitted_text):]
-                            text_frame.text = fitted_text
-                            reduction_pct = int((1 - len(fitted_text)/original_len) * 100)
-                            
-                            # Store overflow report
-                            overflow_reports.append({
-                                'slide_number': slide_num,
-                                'shape_name': shape_name,
-                                'box_info': box_info,
-                                'original_length': original_len,
-                                'fitted_length': len(fitted_text),
-                                'overflow_content': overflow_content[:100] + '...' if len(overflow_content) > 100 else overflow_content
-                            })
-                            
-                            print(f"    CORRECTED: {original_len} → {len(fitted_text)} chars (-{reduction_pct}%)")
-                            print(f"    LOST CONTENT: '{overflow_content[:80]}...'")
-                    else:
-                        # Log that this box was checked and is OK
-                        if original_len > 200:  # Only log longer text that passed
-                            print(f"    slide {slide_num} '{shape_name}': {original_len} chars fits OK")
-                
-                except Exception as e:
-                    print(f"    error processing text on slide {slide_num}: {e}")
-                    import traceback
-                    traceback.print_exc()
-            
-            if slide_shortened > 0:
-                print(f"  📊 slide {slide_num}: corrected {slide_shortened} text boxes")
-        
-        print(f"\n  ENFORCEMENT COMPLETE:")
-        print(f"     checked: {total_checked} text boxes")
-        print(f"     corrected: {total_shortened} overflow violations")
-        print(f"     status: {'all text within boundaries' if total_shortened == 0 else 'overflows fixed (content truncated)'}")
-        
-        if overflow_reports:
-            print(f"\n  OVERFLOW REPORT ({len(overflow_reports)} truncations):")
-            for report in overflow_reports:
-                print(f"     • Slide {report['slide_number']} ({report['shape_name']}): {report['original_length']} → {report['fitted_length']} chars")
-                print(f"       Lost: '{report['overflow_content']}'")
-        
-        return overflow_reports
+        # DISABLED: Do not auto-truncate text
+        # The overflow detection will handle this properly
+        return []
     
     def _detect_text_overflow(self, shape, text_frame):
         """
@@ -720,9 +645,11 @@ class PPTXService:
     def _validate_no_overflow(self, presentation):
         """
         Final validation pass: ensure NO text boxes overflow their boundaries.
-        Returns count of violations found.
+        Returns tuple: (violation_count, overflow_details)
+        overflow_details is a list of dicts with slide_idx, shape_name, and current_text
         """
         violations = 0
+        overflow_details = []
         
         for slide_num, slide in enumerate(presentation.slides, 1):
             for shape in slide.shapes:
@@ -738,7 +665,15 @@ class PPTXService:
                     if self._detect_text_overflow(shape, text_frame):
                         violations += 1
                         shape_name = getattr(shape, 'name', 'Unknown')
-                        print(f"    ❌ VIOLATION: slide {slide_num}, shape '{shape_name}' still overflows!")
+                        print(f"    VIOLATION: slide {slide_num}, shape '{shape_name}' still overflows!")
+                        
+                        overflow_details.append({
+                            'slide_idx': slide_num - 1,  # 0-based
+                            'slide_num': slide_num,  # 1-based for display
+                            'shape_name': shape_name,
+                            'current_text': text_frame.text,
+                            'char_count': len(text_frame.text),
+                        })
                 
                 except Exception as e:
                     print(f"    warning: validation error on slide {slide_num}: {e}")
@@ -748,14 +683,20 @@ class PPTXService:
         else:
             print(f"  VALIDATION FAILED: {violations} boxes still overflow boundaries")
         
+        return violations, overflow_details
+        
         return violations
     
-    def generate_deck(self, slide_specs, custom_theme=None):
+    def generate_deck(self, slide_specs, custom_theme=None, allow_overflow=False):
         if not self.template_path or not os.path.exists(self.template_path):
-            raise ValueError('No template presentation available')
+            error_msg = 'No template presentation available. '
+            if self.template_path:
+                error_msg += f'Template path was set to {self.template_path} but file does not exist. '
+            error_msg += 'Please upload a template file or load a template that has a file stored.'
+            raise ValueError(error_msg)
         
         if self.stored_rules is None:
-            raise ValueError('No rules stored')
+            raise ValueError('No rules stored. Please upload a template or load one from the database.')
         
         if not isinstance(slide_specs, list):
             raise ValueError(f'slide_specs must be a list, got {type(slide_specs)}')
@@ -770,15 +711,18 @@ class PPTXService:
             target_prs.part.drop_rel(rId)
             del target_prs.slides._sldIdLst[i]
         
-        print(f"\ncloning {len(slide_specs)} slides from template")
-        
         # Apply custom theme overrides if provided
         if custom_theme:
-            print(f"\napplying custom theme overrides...")
             self._apply_theme_overrides(custom_theme)
         
         layouts = self.stored_rules.get('layouts', [])
         layout_map = {layout['name']: layout for layout in layouts}
+        
+        # debug: log available layouts with their indices
+        print(f"\navailable layouts in template:")
+        for layout_name, layout_data in layout_map.items():
+            layout_idx = layout_data.get('layout_index', layout_data.get('layout_idx', layout_data.get('slide_number', '?') - 1 if isinstance(layout_data.get('slide_number'), int) else '?'))
+            print(f"  - '{layout_name}' -> source slide index {layout_idx}")
         
         # Import the cloning utility
         from utils.slide_cloner import clone_slide_with_content
@@ -790,27 +734,30 @@ class PPTXService:
             layout_name = spec.get('layout_name')
             placeholders_data = spec.get('placeholders', [])
             
-            print(f"\ngenerating slide {i + 1}: {layout_name}")
-            print(f"content items: {len(placeholders_data)}")
+            print(f"\nslide {i+1}: requesting layout '{layout_name}'")
             
-            # Debug: show what content we're passing
-            for ph in placeholders_data:
-                ph_idx = ph.get('idx', '?')
-                ph_type = ph.get('type', '?')
-                if ph_type == 'text':
-                    content_preview = ph.get('content', '')[:50]
-                    print(f"  placeholder idx={ph_idx}, type={ph_type}, content='{content_preview}...'")
-                else:
-                    print(f"  placeholder idx={ph_idx}, type={ph_type}")
+            # strip any suffix that might have been added (e.g., "[TEXT-ONLY: 2T+0I]")
+            if '[' in layout_name and ']' in layout_name:
+                original_name = layout_name
+                layout_name = layout_name.split('[')[0].strip()
+                print(f"  stripped suffix: '{original_name}' -> '{layout_name}'")
             
             if layout_name not in layout_map:
-                print(f"  error: layout '{layout_name}' not found, skipping")
-                continue
+                print(f"  ERROR: layout '{layout_name}' not found in template!")
+                print(f"  available layouts: {list(layout_map.keys())}")
+                # use first available layout as fallback
+                if layout_map:
+                    fallback_name = list(layout_map.keys())[0]
+                    print(f"  using fallback layout: {fallback_name}")
+                    layout_name = fallback_name
+                else:
+                    raise ValueError(f"no layouts available in template")
             
             layout_template = layout_map[layout_name]
             
             # Get the source slide index (0-based) from the layout
-            source_slide_index = layout_template.get('layout_index', layout_template.get('slide_number', 1) - 1)
+            source_slide_index = layout_template.get('layout_index', layout_template.get('layout_idx', layout_template.get('slide_number', 1) - 1))
+            print(f"  -> will clone from source slide index {source_slide_index}")
             
             try:
                 # Clone the slide from source template, filling placeholders with new content
@@ -822,31 +769,24 @@ class PPTXService:
                     self.uploaded_images,
                     self.image_order
                 )
-                print(f"  ✓ slide cloned successfully from template slide {source_slide_index + 1}")
             except Exception as e:
                 print(f"  error cloning slide: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
         
-        # CRITICAL: Validate and fix all shape positions to ensure they're within slide bounds
-        print(f"\nvalidating shape positions...")
+        # validate and fix all shape positions
         self._validate_and_fix_shape_positions(target_prs)
         
-        # CRITICAL: Final safety net - enforce text fitting using actual measurements
-        print(f"\nFINAL SAFETY NET: Overflow Enforcement...")
+        # enforce text fitting using actual measurements
         overflow_reports = self._enforce_text_fit_by_measurement(target_prs)
         
-        # FINAL VALIDATION: Double-check no overflows remain
-        print(f"\nFINAL VALIDATION...")
-        violations = self._validate_no_overflow(target_prs)
+        # validate no overflows remain
+        violations, overflow_details = self._validate_no_overflow(target_prs)
         if violations > 0:
-            raise ValueError(f"CRITICAL: {violations} text boxes still overflow after enforcement! Generation failed.")
-        
-        # Warn if content was truncated (should rarely happen with good AI chunking)
-        if overflow_reports:
-            print(f"\nWARNING: {len(overflow_reports)} text boxes required truncation.")
-            print(f"    This indicates AI capacity estimation was off. Content may be lost.")
+            if not allow_overflow:
+                # raise exception so caller can handle (offer compression or retry)
+                raise TextOverflowException(violations, overflow_details, slide_specs)
         
         output = BytesIO()
         target_prs.save(output)
